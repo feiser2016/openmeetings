@@ -32,8 +32,7 @@
 					<ol class="install-steps">
 						<li class="step">
 							<div>
-								<a href="https://doc-kurento.readthedocs.io/en/stable/user/installation.html">Install Kurento Media server</a>
-								It should be run under same user as OM
+								<a href="InstallMediaServer.html">Install Kurento Media server</a>
 							</div>
 							<div class="small"></div>
 						</li>
@@ -42,12 +41,12 @@
 							<div class="small">Java 8 required</div>
 						</li>
 						<li class="step unpack">
-							<div>Unpack + run red5.bat (.sh)</div>
-							<div class="small">(Windows: double click red5.bat)</div>
+							<div>Unpack + run bin/startup.bat (.sh)</div>
+							<div class="small">(Windows: double click startup.bat)</div>
 						</li>
 						<li class="step run">
 							<div>Run Web Installer</div>
-							<div class="small">(goto: <a href="http://localhost:5080/openmeetings/install">http://localhost:5080/openmeetings/install</a>)</div>
+							<div class="small">(goto: <a href="https://localhost:5443/openmeetings/install">https://localhost:5443/openmeetings/install</a>)</div>
 						</li>
 					</ol>
 					<script type="text/javascript"><![CDATA[
@@ -67,7 +66,7 @@
 					</script>
 				</div>
 				<p>
-					<i>Note: Openmeetings requires JRE 8, JRE 6/7 is NOT compatible!</i><br />
+					<i>Note: Openmeetings requires JRE 8, JRE 6/7 are NOT compatible!</i><br />
 					<i>
 						Since Version 2.0 you can also install OpenMeetings from command line. Just cd to the unpacked
 						archive and type ./admin.sh or admin.bat, please see
@@ -248,7 +247,7 @@
 		<section name="Tips and Tricks">
 			<ul>
 				<li>
-					Use the Debug-Application: open <tt>$RED5_HOME/webapps/openmeetings/WEB-INF/web.xml</tt> change
+					Use the Debug-Application: open <tt>$OM_HOME/webapps/openmeetings/WEB-INF/web.xml</tt> change
 					<source><![CDATA[
 <init-param>
 	<param-name>configuration</param-name>
@@ -264,7 +263,7 @@
 					then access your OM installation
 				</li>
 				<li>If you have Problems with conversion-jobs check your openmeetings log
-					output (available at <tt>$RED5_HOME/logs/openmeetings.log</tt>). There will be error Messages which help you. You must
+					output (available at <tt>$OM_HOME/logs/openmeetings.log</tt>). There will be error Messages which help you. You must
 					install OpenOffice, ImageMagick and GhostScript to run
 					all conversion-Jobs correctly.
 				</li>

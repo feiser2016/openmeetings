@@ -22,8 +22,8 @@ import static org.apache.commons.io.FileUtils.copyFile;
 import static org.apache.commons.lang3.math.NumberUtils.toInt;
 import static org.apache.openmeetings.util.CalendarHelper.formatMillis;
 import static org.apache.openmeetings.util.OmFileHelper.EXTENSION_PNG;
+import static org.apache.openmeetings.util.OmFileHelper.getPublicDir;
 import static org.apache.openmeetings.util.OmFileHelper.getRecordingChunk;
-import static org.apache.openmeetings.util.OmFileHelper.getStreamsHibernateDir;
 import static org.apache.openmeetings.util.OmFileHelper.getStreamsSubDir;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_PATH_FFMPEG;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_PATH_IMAGEMAGIC;
@@ -38,12 +38,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.openmeetings.db.dao.basic.ConfigurationDao;
 import org.apache.openmeetings.db.dao.file.FileItemLogDao;
 import org.apache.openmeetings.db.dao.record.RecordingChunkDao;
+import org.apache.openmeetings.db.dao.record.RecordingDao;
 import org.apache.openmeetings.db.entity.file.BaseFileItem;
 import org.apache.openmeetings.db.entity.record.Recording;
 import org.apache.openmeetings.db.entity.record.RecordingChunk;
@@ -59,16 +61,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 public abstract class BaseConverter {
 	private static final Logger log = LoggerFactory.getLogger(BaseConverter.class);
 	private static final Pattern p = Pattern.compile("\\d{2,5}(x)\\d{2,5}");
-	public static final String EXEC_EXT = System.getProperty("os.name").toUpperCase().indexOf("WINDOWS") < 0 ? "" : ".exe";
+	public static final String EXEC_EXT = System.getProperty("os.name").toUpperCase(Locale.ROOT).indexOf("WINDOWS") < 0 ? "" : ".exe";
 	private static final int MINUTE_MULTIPLIER = 60 * 1000;
 	public static final int TIME_TO_WAIT_FOR_FRAME = 15 * MINUTE_MULTIPLIER;
 
 	@Autowired
 	protected ConfigurationDao cfgDao;
 	@Autowired
-	private RecordingChunkDao chunkDao;
+	protected RecordingChunkDao chunkDao;
 	@Autowired
 	protected FileItemLogDao logDao;
+	@Autowired
+	protected RecordingDao recordingDao;
 
 	protected static class Dimension {
 		private final int width;
@@ -154,7 +158,7 @@ public abstract class BaseConverter {
 		stripAudioFirstPass(r, logs, waveFiles, streamFolder, chunks == null ? chunkDao.getNotScreenChunksByRecording(r.getId()) : chunks);
 		if (waveFiles.isEmpty()) {
 			// create default Audio to merge it. strip to content length
-			String oneSecWav = new File(getStreamsHibernateDir(), "one_second.wav").getCanonicalPath();
+			String oneSecWav = new File(getPublicDir(), "one_second.wav").getCanonicalPath();
 
 			// Calculate delta at beginning
 			double duration = diffSeconds(r.getRecordEnd(), r.getRecordStart());
@@ -268,43 +272,6 @@ public abstract class BaseConverter {
 					// Strip Wave to Full Length
 					File outputGapFullWav = outputWav;
 
-					/* FIXME TODO
-					// Fix Start/End in Audio
-					List<RecordingMetaDelta> metaDeltas = metaDeltaDao.getByMetaId(metaId);
-
-					int counter = 0;
-
-					for (RecordingMetaDelta metaDelta : metaDeltas) {
-						File inputFile = outputGapFullWav;
-
-						// Strip Wave to Full Length
-						String hashFileGapsFullName = metaData.getStreamName() + "_GAP_FULL_WAVE_" + counter + ".wav";
-						outputGapFullWav = new File(streamFolder, hashFileGapsFullName);
-
-						metaDelta.setWaveOutPutName(hashFileGapsFullName);
-
-						String[] soxArgs = null;
-
-						if (metaDelta.getDeltaTime() != null) {
-							double gapSeconds = diffSeconds(metaDelta.getDeltaTime());
-							if (metaDelta.isStartPadding()) {
-								soxArgs = addSoxPad(logs, "fillGap", gapSeconds, 0, inputFile, outputGapFullWav);
-							} else if (metaDelta.isEndPadding()) {
-								soxArgs = addSoxPad(logs, "fillGap", 0, gapSeconds, inputFile, outputGapFullWav);
-							}
-						}
-
-						if (soxArgs != null) {
-							log.debug("START fillGap ################# Delta-ID :: {}", metaDelta.getId());
-
-							metaDeltaDao.update(metaDelta);
-							counter++;
-						} else {
-							outputGapFullWav = inputFile;
-						}
-					}
-					*/
-
 					// Strip Wave to Full Length
 					String hashFileFullName = chunk.getStreamName() + "_FULL_WAVE.wav";
 					File outputFullWav = new File(streamFolder, hashFileFullName);
@@ -348,6 +315,7 @@ public abstract class BaseConverter {
 		argv.addAll(Arrays.asList(
 				"-c:v", "h264", //
 				"-crf", "24",
+				"-vsync", "0",
 				"-pix_fmt", "yuv420p",
 				"-preset", getVideoPreset(),
 				"-profile:v", "baseline",

@@ -19,14 +19,13 @@
 package org.apache.openmeetings.web.app;
 
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_EXT_PROCESS_TTL;
-import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_HEADER_CSP;
-import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_HEADER_XFRAME;
-import static org.apache.openmeetings.util.OpenmeetingsVariables.HEADER_CSP_SELF;
-import static org.apache.openmeetings.util.OpenmeetingsVariables.HEADER_XFRAME_SAMEORIGIN;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.getApplicationName;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.getBaseUrl;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.getChromeExtensionUrl;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.getContentSecurityPolicy;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.getExtProcessTtl;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.getWicketApplicationName;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.getxFrameOptions;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.isInitComplete;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setExtProcessTtl;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setInitComplete;
@@ -35,6 +34,7 @@ import static org.apache.openmeetings.web.pages.HashPage.INVITATION_HASH;
 import static org.apache.openmeetings.web.user.rooms.RoomEnterBehavior.getRoomUrlFragment;
 import static org.apache.openmeetings.web.util.OmUrlFragment.PROFILE_MESSAGES;
 import static org.apache.wicket.resource.JQueryResourceReference.getV3;
+import static org.wicketstuff.dashboard.DashboardContextInitializer.DASHBOARD_CONTEXT_KEY;
 
 import java.io.File;
 import java.net.UnknownHostException;
@@ -46,6 +46,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+
+import javax.websocket.WebSocketContainer;
 
 import org.apache.openmeetings.IApplication;
 import org.apache.openmeetings.core.util.WebSocketHelper;
@@ -67,7 +69,6 @@ import org.apache.openmeetings.db.entity.user.User.Type;
 import org.apache.openmeetings.db.util.ws.RoomMessage;
 import org.apache.openmeetings.db.util.ws.TextRoomMessage;
 import org.apache.openmeetings.util.OmFileHelper;
-import org.apache.openmeetings.util.OpenmeetingsVariables;
 import org.apache.openmeetings.util.Version;
 import org.apache.openmeetings.util.ws.IClusterWsMessage;
 import org.apache.openmeetings.web.pages.AccessDeniedPage;
@@ -128,7 +129,6 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
 import org.wicketstuff.dashboard.WidgetRegistry;
 import org.wicketstuff.dashboard.web.DashboardContext;
-import org.wicketstuff.dashboard.web.DashboardContextInjector;
 import org.wicketstuff.dashboard.web.DashboardSettings;
 import org.wicketstuff.datastores.hazelcast.HazelcastDataStore;
 
@@ -146,9 +146,9 @@ public class Application extends AuthenticatedWebApplication implements IApplica
 	private static final Logger log = LoggerFactory.getLogger(Application.class);
 	private static boolean isInstalled;
 	private static final String INVALID_SESSIONS_KEY = "INVALID_SESSIONS_KEY";
+	private static final String SERVER_CONTAINER_SERVLET_CONTEXT_ATTRIBUTE = "javax.websocket.server.ServerContainer";
 	public static final String NAME_ATTR_KEY = "name";
 	//additional maps for faster searching should be created
-	private DashboardContext dashboardContext;
 	private static final Set<String> STRINGS_WITH_APP = new HashSet<>();
 	private static String appName;
 	static {
@@ -159,8 +159,6 @@ public class Application extends AuthenticatedWebApplication implements IApplica
 	public static final String SIGNIN_MAPPING = "/signin";
 	public static final String NOTINIT_MAPPING = "/notinited";
 	final HazelcastInstance hazelcast = Hazelcast.getOrCreateHazelcastInstance(new XmlConfigBuilder().build());
-	private String xFrameOptions = HEADER_XFRAME_SAMEORIGIN;
-	private String contentSecurityPolicy = OpenmeetingsVariables.HEADER_CSP_SELF;
 	private ITopic<IClusterWsMessage> hazelWsTopic;
 
 	@Autowired
@@ -183,19 +181,15 @@ public class Application extends AuthenticatedWebApplication implements IApplica
 		getApplicationSettings().setAccessDeniedPage(AccessDeniedPage.class);
 		getComponentInstantiationListeners().add(new SpringComponentInjector(this, ctx, true));
 
-		// FIXME TODO WICKET-6588
-		if (getServletContext().getSessionCookieConfig().getName() == null) {
-			getServletContext().getSessionCookieConfig().setName("OMSESSIONID");
-		}
 		hazelcast.getCluster().getLocalMember().setStringAttribute(NAME_ATTR_KEY, hazelcast.getName());
 		hazelWsTopic = hazelcast.getTopic("default");
 		hazelWsTopic.addMessageListener(msg -> {
-				String serverId = msg.getPublishingMember().getStringAttribute(NAME_ATTR_KEY);
-				if (serverId.equals(hazelcast.getName())) {
-					return;
-				}
-				WbWebSocketHelper.send(msg.getMessageObject());
-			});
+			String serverId = msg.getPublishingMember().getStringAttribute(NAME_ATTR_KEY);
+			if (serverId.equals(hazelcast.getName())) {
+				return;
+			}
+			WbWebSocketHelper.send(msg.getMessageObject());
+		});
 		hazelcast.getCluster().addMembershipListener(new MembershipListener() {
 			@Override
 			public void memberRemoved(MembershipEvent evt) {
@@ -249,17 +243,23 @@ public class Application extends AuthenticatedWebApplication implements IApplica
 					wresp.setHeader("X-XSS-Protection", "1; mode=block");
 					wresp.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
 					wresp.setHeader("X-Content-Type-Options", "nosniff");
-					wresp.setHeader("X-Frame-Options", xFrameOptions);
 					Url reqUrl = cycle.getRequest().getUrl();
 					wresp.setHeader("Content-Security-Policy"
-							, String.format("%s; connect-src 'self' %s;", contentSecurityPolicy, getWsUrl(reqUrl)));
+							, String.format("%s; connect-src 'self' %s; frame-src %s %s;"
+									, getContentSecurityPolicy(), getWsUrl(reqUrl)
+									, getxFrameOptions(), getChromeExtensionUrl()
+							));
 				}
 			}
 		});
+		final WebSocketContainer sc = (WebSocketContainer)getServletContext().getAttribute(SERVER_CONTAINER_SERVLET_CONTEXT_ATTRIBUTE);
+		if (sc != null) {
+			sc.setDefaultMaxSessionIdleTimeout(60 * 1000L); // should be enough, should it be configurable?
+		}
 		super.init();
 
 		// register some widgets
-		dashboardContext = new DashboardContext();
+		final DashboardContext dashboardContext = getDashboardContext();
 		dashboardContext.setDashboardPersister(new UserDashboardPersister());
 		WidgetRegistry widgetRegistry = dashboardContext.getWidgetRegistry();
 		widgetRegistry.registerWidget(new MyRoomsWidgetDescriptor());
@@ -268,8 +268,6 @@ public class Application extends AuthenticatedWebApplication implements IApplica
 		widgetRegistry.registerWidget(new StartWidgetDescriptor());
 		widgetRegistry.registerWidget(new RssWidgetDescriptor());
 		widgetRegistry.registerWidget(new AdminWidgetDescriptor());
-		// add dashboard context injector
-		getComponentInstantiationListeners().add(new DashboardContextInjector(dashboardContext));
 		DashboardSettings dashboardSettings = DashboardSettings.get();
 		dashboardSettings.setIncludeJQueryUI(false);
 
@@ -303,8 +301,6 @@ public class Application extends AuthenticatedWebApplication implements IApplica
 			cfgDao.reinit();
 
 			// Init properties
-			setXFrameOptions(cfgDao.getString(CONFIG_HEADER_XFRAME, HEADER_XFRAME_SAMEORIGIN));
-			setContentSecurityPolicy(cfgDao.getString(CONFIG_HEADER_CSP, HEADER_CSP_SELF));
 			updateJpaAddresses();
 			setExtProcessTtl(cfgDao.getInt(CONFIG_EXT_PROCESS_TTL, getExtProcessTtl()));
 			Version.logOMStarted();
@@ -364,7 +360,7 @@ public class Application extends AuthenticatedWebApplication implements IApplica
 	}
 
 	public static DashboardContext getDashboardContext() {
-		return get().dashboardContext;
+		return get().getMetaData(DASHBOARD_CONTEXT_KEY);
 	}
 
 	//package private
@@ -559,16 +555,6 @@ public class Application extends AuthenticatedWebApplication implements IApplica
 	@Override
 	public String getOmString(String key, final Locale loc, String... params) {
 		return getString(key, loc, params);
-	}
-
-	@Override
-	public void setXFrameOptions(String xFrameOptions) {
-		this.xFrameOptions = xFrameOptions;
-	}
-
-	@Override
-	public void setContentSecurityPolicy(String contentSecurityPolicy) {
-		this.contentSecurityPolicy = contentSecurityPolicy;
 	}
 
 	@Override

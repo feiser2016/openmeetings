@@ -2,15 +2,20 @@
 const WB_AREA_SEL = '.room.wb.area';
 const WBA_WB_SEL = '.room.wb.area .ui-tabs-panel.ui-corner-bottom.ui-widget-content:visible';
 const VID_SEL = '.video.user-video';
-const CAM_ACTIVITY = 'broadcastV';
-const MIC_ACTIVITY = 'broadcastA';
+const CAM_ACTIVITY = 'VIDEO';
+const MIC_ACTIVITY = 'AUDIO';
+const SCREEN_ACTIVITY = 'SCREEN';
+const REC_ACTIVITY = 'RECORD';
 var VideoUtil = (function() {
 	const self = {};
 	function _getVid(uid) {
 		return 'video' + uid;
 	}
 	function _isSharing(sd) {
-		return 'screen' === sd.type;
+		return !!sd && 'SCREEN' === sd.type && sd.activities.includes(SCREEN_ACTIVITY);
+	}
+	function _isRecording(sd) {
+		return !!sd && 'SCREEN' === sd.type && sd.activities.includes(REC_ACTIVITY);
 	}
 	function _hasAudio(sd) {
 		return !sd || sd.activities.includes(MIC_ACTIVITY);
@@ -110,22 +115,85 @@ var VideoUtil = (function() {
 		if (!!peer) {
 			peer.cleaned = true;
 			const pc = peer.peerConnection;
-			if (!!pc && !!pc.getLocalStreams()) {
-				pc.getLocalStreams().forEach(function(stream) {
-					_cleanStream(stream);
-				});
+			try {
+				if (!!pc && !!pc.getLocalStreams()) {
+					pc.getLocalStreams().forEach(function(stream) {
+						_cleanStream(stream);
+					});
+				}
+			} catch(e) {
+				OmUtil.log('Failed to clean peer' + e);
 			}
 			peer.dispose();
 			peer = null;
 		}
 	}
-	function _isEdge() {
-		const b = kurentoUtils.WebRtcPeer.browser;
+	function _isChrome(_b) {
+		const b = _b || kurentoUtils.WebRtcPeer.browser;
+		return b.name === 'Chrome' || b.name === 'Chromium';
+	}
+	function _isChrome72(_b) {
+		const b = _b || kurentoUtils.WebRtcPeer.browser;
+		return _isChrome(b) && b.major > 71;
+	}
+	function _isEdge(_b) {
+		const b = _b || kurentoUtils.WebRtcPeer.browser;
 		return b.name === 'Edge';
+	}
+	function _setPos(v, pos) {
+		v.dialog('widget').css(pos);
+	}
+	function _askPermission(callback) {
+		const perm = $('#ask-permission');
+		if (undefined === perm.dialog('instance')) {
+			perm.data('callbacks', []).dialog({
+				appendTo: '.room.holder .room.box'
+				, autoOpen: true
+				, buttons: [
+					{
+						text: perm.data('btn-ok')
+						, click: function() {
+							while (perm.data('callbacks').length > 0) {
+								perm.data('callbacks').pop()();
+							}
+							$(this).dialog('close');
+						}
+					}
+				]
+			});
+		} else if (!perm.dialog('isOpen')) {
+			perm.dialog('open')
+		}
+		perm.data('callbacks').push(callback);
+	}
+	function _disconnect(node) {
+		try {
+			node.disconnect(); //this one can throw
+		} catch (e) {
+			//no-op
+		}
+	}
+	function _sharingSupported() {
+		const b = kurentoUtils.WebRtcPeer.browser;
+		return (b.name === 'Edge' && b.major > 16)
+			|| (b.name === 'Firefox')
+			|| (b.name === 'Chrome')
+			|| (b.name === 'Chromium');
+	}
+	function _highlight(el, count) {
+		if (!el || el.length < 1 || el.hasClass('disabled') || count < 0) {
+			return;
+		}
+		el.addClass('ui-state-highlight', 2000, function() {
+			el.removeClass('ui-state-highlight', 2000, function() {
+				_highlight(el, --count);
+			});
+		});
 	}
 
 	self.getVid = _getVid;
 	self.isSharing = _isSharing;
+	self.isRecording = _isRecording;
 	self.hasAudio = _hasAudio;
 	self.hasVideo = _hasVideo;
 	self.getRects = _getRects;
@@ -141,5 +209,12 @@ var VideoUtil = (function() {
 		return opts;
 	};
 	self.isEdge = _isEdge;
+	self.isChrome = _isChrome;
+	self.isChrome72 = _isChrome72;
+	self.setPos = _setPos;
+	self.askPermission = _askPermission;
+	self.disconnect = _disconnect;
+	self.sharingSupported = _sharingSupported;
+	self.highlight = _highlight;
 	return self;
 })();

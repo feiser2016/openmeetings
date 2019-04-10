@@ -2,8 +2,59 @@
 var PRESENTER = 'presenter';
 var WHITEBOARD = 'whiteBoard';
 var DrawWbArea = function() {
-	const self = BaseWbArea();;
+	const self = BaseWbArea()
+		, arrowImg = new Image(), delImg = new Image();
+	arrowImg.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABwAAAAICAYAAADqSp8ZAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAygAAAMoBawMUsgAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAFsSURBVCiRrdI/SEJRFMfx37lPGxqKoGwxKJoaImhpCf8NEUFL9WgLUrPnIyEIa6reVEPQn0GeWDS4NDQETQ2JT4waojUoHBqCoJKWINB3720yIhGl+q7ncj5nuIQ6jWiaq1xmU4IwBACQ5GCAU5D8IECRAkUQzt8V++wmlSrX20e1BoFIrFdwHidIIQhH5O68sgzD/vnOF4m0QyijJGgMQIHZtJdJJ4oNg6qqNr20dKwBaOWKvZFPpZ7qXV3JH4wNSMbjJHGZ7XIlYRiiFkiBsL4CphwLwbck5E7uwMw3ClXD2iRImYYUq9lD886nLXZbyd2HL9AbXpglySOQeFVstpRJJ+5/i1UajkbbHCXahMS1ZAiS2+W1DMNmqqoqBLFMYIME1uxkvPRXDAAuTPMNhCwIGiT62eOzAQDkD+nbAjQDxudy+8mT/8C+FwjNjwuwdQnqY7b0kCesT7DC7allWVU/8D/zh3SdC/R8Aq9QhRc3h8LfAAAAAElFTkSuQmCC';
+	delImg.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAMAAAGgrv1cAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAADNQTFRFAAAA4j094j094j094j094j094j094j094j094j094j094j094j094j094j094j094j09hIdAxgAAABB0Uk5TABAgMEBQYHCAj5+vv8/f7yMagooAAADXSURBVBgZBcEBYoQgDACw1DJETmz//9olwGn6AAAbBxoiSACTpCTtJd02smg+MPoef7UgnpPQeVM42Vg02kl+qAPeE2B19wYAgO83xi6ggRMoBfuvsUSxp+vPjag98VqwC8oI9ozC5rMnUVbw5ITID94Fo4D4umsAwN/+urvfOwDg6d8FiFUnALPnkwCs6zvg+UKcSmD3ZBWyL4hTye4J3s16AXG6J+D+uD/A7vtUAutFT9g9EacSURNX33ZPQJzKqAW8lQCIXyWAVfUM5Hz7vQAAMcZIAP9DvgiOL2K6DwAAAABJRU5ErkJggg==';
 	let container, area, tabs, scroll, role = NONE, _inited = false;
+
+	// Fabric overrides (should be kept up-to-date on fabric.js updates)
+	if ('function' !== typeof(window.originalDrawControl)) {
+		window.originalDrawControl = fabric.Object.prototype._drawControl;
+		window.originalGetRotatedCornerCursor = fabric.Canvas.prototype._getRotatedCornerCursor;
+		window.originalGetActionFromCorner = fabric.Canvas.prototype._getActionFromCorner;
+		window.originalGetCornerCursor = fabric.Canvas.prototype.getCornerCursor;
+		fabric.Object.prototype._drawControl = function(control, ctx, methodName, left, top, styleOverride) {
+			switch (control) {
+				case 'mtr':
+				{
+					const x = left + (this.cornerSize - arrowImg.width) / 2
+						, y = top + (this.cornerSize - arrowImg.height) / 2;
+					ctx.drawImage(arrowImg, x, y);
+				}
+					break;
+				case 'tr':
+				{
+					const x = left + (this.cornerSize - delImg.width) / 2
+						, y = top + (this.cornerSize - delImg.height) / 2;
+					ctx.drawImage(delImg, x, y);
+				}
+					break;
+				default:
+					window.originalDrawControl.call(this, control, ctx, methodName, left, top, styleOverride);
+					break;
+			}
+		};
+		fabric.Canvas.prototype._getRotatedCornerCursor = function(corner, target, e) {
+			if (role === PRESENTER && 'tr' === corner) {
+				return 'pointer';
+			}
+			return window.originalGetRotatedCornerCursor.call(this, corner, target, e);
+		};
+		fabric.Canvas.prototype._getActionFromCorner = function(alreadySelected, corner, e) {
+			if (role === PRESENTER && 'tr' === corner) {
+				_performDelete();
+				return 'none';
+			}
+			return window.originalGetActionFromCorner.call(this, alreadySelected, corner, e);
+		};
+		fabric.Canvas.prototype.getCornerCursor = function(corner, target, e) {
+			if (role === PRESENTER && 'tr' === corner) {
+				return 'pointer';
+			}
+			return window.originalGetCornerCursor.call(this, corner, target, e);
+		}
+	}
 
 	function refreshTabs() {
 		tabs.tabs('refresh').find('ul').removeClass('ui-corner-all').removeClass('ui-widget-header');
@@ -42,7 +93,11 @@ var DrawWbArea = function() {
 			switch (e.which) {
 				case 8:  // backspace
 				case 46: // delete
+					e.preventDefault();
+					e.stopImmediatePropagation();
 					return _performDelete();
+				default:
+					//no-op
 			}
 		}
 	}
@@ -85,9 +140,9 @@ var DrawWbArea = function() {
 			OmUtil.confirmDlg('wb-confirm-remove', function() { wbAction('removeWb', JSON.stringify({wbId: li.data().wbId})); });
 		});
 	}
-	function _getImage(cnv, fmt) {
+	function _getImage(cnv) {
 		return cnv.toDataURL({
-			format: fmt
+			format: 'image/png'
 			, width: cnv.width
 			, height: cnv.height
 			, multiplier: 1. / cnv.getZoom()
@@ -114,7 +169,9 @@ var DrawWbArea = function() {
 		return self.getWb(id).getCanvas();
 	};
 	self.setRole = function(_role) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		role = _role;
 		const tabsNav = tabs.find('.ui-tabs-nav');
 		tabsNav.sortable(role === PRESENTER ? 'enable' : 'disable');
@@ -159,7 +216,9 @@ var DrawWbArea = function() {
 		Wicket.Event.subscribe('/websocket/message', self.wbWsHandler);
 		container = $('.room.wb.area');
 		tabs = container.find('.tabs');
-		if (tabs.length === 0) return;
+		if (tabs.length === 0) {
+			return;
+		}
 		tabs.tabs({
 			beforeActivate: function(e) {
 				let res = true;
@@ -194,7 +253,9 @@ var DrawWbArea = function() {
 		Wicket.Event.unsubscribe('/websocket/message', self.wbWsHandler);
 	};
 	self.create = function(obj) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		const tid = self.getWbTabId(obj.wbId)
 			, wb = OmUtil.tmpl('#wb-area', tid)
 			, li = OmUtil.tmpl('#wb-area-tab').data('wb-id', obj.wbId).attr('data-wb-id', obj.wbId)
@@ -213,15 +274,22 @@ var DrawWbArea = function() {
 					return;
 				}
 				const editor = $('<input name="newName" type="text" style="color: black;"/>')
-					, name = $(this).hide().after(editor.val(obj.name));
-				editor.focus().blur(function() {
-					const newName = $(this).val();
-					if (newName !== '') {
-						wbAction('renameWb', JSON.stringify({wbId: obj.wbId, name: newName}));
-					}
-					$(this).remove();
-					name.show();
-				});
+					, name = $(this).hide().after(editor.val(obj.name))
+					, renameWbTab = function() {
+						const newName = editor.val();
+						if (newName !== '') {
+							wbAction('renameWb', JSON.stringify({wbId: obj.wbId, name: newName}));
+						}
+						editor.remove();
+						name.show();
+					};
+				editor.focus()
+					.blur(renameWbTab)
+					.keyup(function(evt) {
+						if (evt.which === 13) {
+							renameWbTab();
+						}
+					});
 			});
 
 		tabs.find('.ui-tabs-nav').append(li);
@@ -231,25 +299,34 @@ var DrawWbArea = function() {
 
 		const wbo = Wb();
 		wbo.init(obj, tid, role);
+		wb.on('remove', wbo.destroy);
 		wb.data(wbo);
 		_resizeWbs();
 	}
 	self.createWb = function(obj) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		self.create(obj);
 		_activateTab(obj.wbId);
 		_actionActivateWb(obj.wbId);
 	};
 	self.activateWb = function(obj) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		_activateTab(obj.wbId);
 	}
 	self.renameWb = function(obj) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		_renameTab(obj);
 	}
 	self.removeWb = function(obj) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		const tabId = self.getWbTabId(obj.wbId);
 		_getWbTab(obj.wbId).remove();
 		$('#' + tabId).remove();
@@ -257,38 +334,54 @@ var DrawWbArea = function() {
 		_actionActivateWb(getActive().data().id);
 	};
 	self.load = function(json) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		self.getWb(json.wbId).load(json.obj);
 	};
 	self.setSlide = function(json) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		self.getWb(json.wbId).setSlide(json.slide);
 	};
 	self.createObj = function(json) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		self.getWb(json.wbId).createObj(json.obj);
 	};
 	self.modifyObj = function(json) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		self.getWb(json.wbId).modifyObj(json.obj);
 	};
 	self.deleteObj = function(json) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		self.getWb(json.wbId).removeObj(json.obj);
 	};
 	self.clearAll = function(json) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		self.getWb(json.wbId).clearAll();
 		Room.setSize();
 	};
 	self.clearSlide = function(json) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		self.getWb(json.wbId).clearSlide(json.slide);
 	};
 	self.resize = function(sbW, chW, w, h) {
 		const hh = h - 5;
 		container.width(w).height(h).css('left', (Settings.isRtl ? chW : sbW) + 'px');
-		if (!container || !_inited) return;
+		if (!container || !_inited) {
+			return;
+		}
 		area.width(w).height(hh);
 
 		const wbTabs = area.find('.tabs.ui-tabs');
@@ -296,45 +389,44 @@ var DrawWbArea = function() {
 		_resizeWbs();
 	}
 	self.setSize = function(json) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		self.getWb(json.wbId).setSize(json);
 	}
 	self.download = function(fmt) {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		const wb = getActive().data();
 		if ('pdf' === fmt) {
 			const arr = [];
 			wb.eachCanvas(function(cnv) {
-				arr.push(_getImage(cnv, 'image/png'));
+				arr.push(_getImage(cnv));
 			});
 			wbAction('downloadPdf', JSON.stringify({
 				slides: arr
 			}));
 		} else {
 			const cnv = wb.getCanvas()
-				, dataUri = _getImage(cnv, fmt)
-				, fName = wb.name + '.' + fmt;
-			if (typeof window.navigator.msSaveOrOpenBlob !== 'undefined') {
-				const byteStr = atob(dataUri.split(',')[1])
-					, mime = dataUri.split(',')[0].split(':')[1].split(';')[0]
-					, ab = new ArrayBuffer(byteStr.length)
-					, ia = new Uint8Array(ab);
-				for (let i = 0; i < byteStr.length; ++i) {
-					ia[i] = byteStr.charCodeAt(i);
-				}
-				window.navigator.msSaveOrOpenBlob(new Blob([ab], {type: mime}), fName);
-			} else {
-				const a = document.createElement('a');
-				a.setAttribute('target', '_blank')
-				a.setAttribute('download', fName);
-				a.setAttribute('href', dataUri);
-				a.dispatchEvent(new MouseEvent('click', {view: window, bubbles: false, cancelable: true}));
+				, dataUri = _getImage(cnv);
+			try {
+				const dlg = $('#download-png');
+				dlg.find('img').attr('src', dataUri);
+				dlg.dialog({
+					width: 350
+					, appendTo: '.room.wb.area'
+				});
+			} catch (e) {
+				console.error(e);
 			}
 		}
 	}
 	self.videoStatus = _videoStatus;
 	self.loadVideos = function() {
-		if (!_inited) return;
+		if (!_inited) {
+			return;
+		}
 		wbAction('loadVideos');
 	};
 	self.initVideos = _initVideos;
@@ -349,14 +441,3 @@ var DrawWbArea = function() {
 	self.updateAreaClass = function() {};
 	return self;
 };
-if ('function' !== window.originalDrawControl) {
-	window.originalDrawControl = fabric.Object.prototype._drawControl;
-	fabric.Object.prototype._drawControl = function(control, ctx, methodName, left, top) {
-		const size = this.cornerSize;
-		if (this.canvas.controlCallback && 'function' === typeof(this.canvas.controlCallback[control])) {
-			this.canvas.controlCallback[control](ctx, left, top, size);
-		} else {
-			window.originalDrawControl.call(this, control, ctx, methodName, left, top);
-		}
-	};
-}

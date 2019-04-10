@@ -22,6 +22,8 @@
 package org.apache.openmeetings.core.remote;
 
 import static java.util.UUID.randomUUID;
+import static org.apache.openmeetings.core.remote.KurentoHandler.PARAM_CANDIDATE;
+import static org.apache.openmeetings.core.remote.KurentoHandler.PARAM_ICE;
 import static org.apache.openmeetings.core.remote.KurentoHandler.newKurentoMsg;
 import static org.apache.openmeetings.util.OmFileHelper.getRecUri;
 import static org.apache.openmeetings.util.OmFileHelper.getRecordingChunk;
@@ -39,14 +41,11 @@ import org.apache.openmeetings.db.entity.record.RecordingChunk.Type;
 import org.apache.openmeetings.db.util.ws.RoomMessage;
 import org.apache.openmeetings.db.util.ws.TextRoomMessage;
 import org.kurento.client.Continuation;
-import org.kurento.client.EventListener;
 import org.kurento.client.IceCandidate;
-import org.kurento.client.IceCandidateFoundEvent;
+import org.kurento.client.MediaFlowState;
 import org.kurento.client.MediaProfileSpecType;
 import org.kurento.client.MediaType;
 import org.kurento.client.RecorderEndpoint;
-import org.kurento.client.RecordingEvent;
-import org.kurento.client.StoppedEvent;
 import org.kurento.client.WebRtcEndpoint;
 import org.kurento.jsonrpc.JsonUtils;
 import org.slf4j.Logger;
@@ -54,12 +53,11 @@ import org.slf4j.LoggerFactory;
 
 import com.github.openjson.JSONObject;
 
-public class KStream implements IKStream {
+public class KStream extends AbstractStream {
 	private static final Logger log = LoggerFactory.getLogger(KStream.class);
 
-	private final String sid;
-	private final String uid;
 	private final KRoom room;
+	private final StreamType streamType;
 	private MediaProfileSpecType profile;
 	private RecorderEndpoint recorder;
 	private WebRtcEndpoint outgoingMedia = null;
@@ -68,26 +66,27 @@ public class KStream implements IKStream {
 	private Type type;
 
 	public KStream(final StreamDesc sd, KRoom room) {
+		super(sd.getSid(), sd.getUid());
 		this.room = room;
-		this.sid = sd.getSid();
-		this.uid = sd.getUid();
+		streamType = sd.getType();
 		//TODO Min/MaxVideoSendBandwidth
 		//TODO Min/Max Audio/Video RecvBandwidth
 	}
 
-	public KStream startBroadcast(final KurentoHandler h, final StreamDesc sd, final String sdpOffer) {
+	public KStream startBroadcast(final StreamProcessor processor, final StreamDesc sd, final String sdpOffer) {
 		if (outgoingMedia != null) {
-			release(h);
+			release(processor, false);
 		}
-		final boolean hasAudio = sd.hasActivity(Activity.broadcastA);
-		final boolean hasVideo = sd.hasActivity(Activity.broadcastV);
+		final boolean hasAudio = sd.hasActivity(Activity.AUDIO);
+		final boolean hasVideo = sd.hasActivity(Activity.VIDEO);
+		final boolean hasScreen = sd.hasActivity(Activity.SCREEN);
 		if ((sdpOffer.indexOf("m=audio") > -1 && !hasAudio)
-				|| (sdpOffer.indexOf("m=video") > -1 && !hasVideo))
+				|| (sdpOffer.indexOf("m=video") > -1 && !hasVideo && StreamType.SCREEN != streamType))
 		{
 			log.warn("Broadcast started without enough rights");
 			return this;
 		}
-		if (StreamType.screen == sd.getType()) {
+		if (StreamType.SCREEN == streamType) {
 			type = Type.SCREEN;
 		} else {
 			if (hasAudio && hasVideo) {
@@ -111,105 +110,118 @@ public class KStream implements IKStream {
 				profile = MediaProfileSpecType.WEBM_VIDEO_ONLY;
 				break;
 		}
-		outgoingMedia = createEndpoint(h, sd.getSid(), sd.getUid());
-		h.streamsByUid.put(uid, this);
-		addListener(h, sd.getSid(), sd.getUid(), sdpOffer);
+		outgoingMedia = createEndpoint(processor, sd.getSid(), sd.getUid());
+		outgoingMedia.addMediaSessionTerminatedListener(evt -> log.warn("Media stream terminated"));
+		outgoingMedia.addMediaFlowOutStateChangeListener(evt -> {
+			if (MediaFlowState.NOT_FLOWING == evt.getState()) {
+				log.warn("Media FlowOut :: {}", evt.getState());
+				if (StreamType.SCREEN == streamType) {
+					processor.doStopSharing(sid, uid);
+				}
+				stopBroadcast(processor);
+			}
+		});
+		outgoingMedia.addMediaFlowInStateChangeListener(evt -> log.warn("Media FlowIn :: {}", evt));
+		processor.addStream(this);
+		addListener(processor, sd.getSid(), sd.getUid(), sdpOffer);
 		if (room.isRecording()) {
-			startRecord();
+			startRecord(processor);
 		}
 		Client c = sd.getClient();
 		WebSocketHelper.sendRoom(new TextRoomMessage(c.getRoomId(), c, RoomMessage.Type.rightUpdated, c.getUid()));
-		WebSocketHelper.sendRoomOthers(room.roomId, c.getUid(), newKurentoMsg()
-				.put("id", "newStream")
-				.put("iceServers", h.getTurnServers())
-				.put("stream", sd.toJson()));
+		if (hasAudio || hasVideo || hasScreen) {
+			WebSocketHelper.sendRoomOthers(room.getRoomId(), c.getUid(), newKurentoMsg()
+					.put("id", "newStream")
+					.put(PARAM_ICE, processor.getHandler().getTurnServers())
+					.put("stream", sd.toJson()));
+		}
 		return this;
 	}
 
-	public void addListener(final KurentoHandler h, String sid, String uid, String sdpOffer) {
+	public void addListener(final StreamProcessor processor, String sid, String uid, String sdpOffer) {
 		final boolean self = uid.equals(this.uid);
-		log.info("USER {}: have started {} in room {}", uid, self ? "broadcasting" : "receiving", room.roomId);
+		log.info("USER {}: have started {} in room {}", uid, self ? "broadcasting" : "receiving", room.getRoomId());
 		log.trace("USER {}: SdpOffer is {}", uid, sdpOffer);
 		if (!self && outgoingMedia == null) {
 			log.warn("Trying to add listener too early");
 			return;
 		}
 
-		final WebRtcEndpoint endpoint = getEndpointForUser(h, sid, uid);
+		final WebRtcEndpoint endpoint = getEndpointForUser(processor, sid, uid);
 		final String sdpAnswer = endpoint.processOffer(sdpOffer);
 
+		log.debug("gather candidates");
+		endpoint.gatherCandidates(); // this one might throw Exception
 		log.trace("USER {}: SdpAnswer is {}", this.uid, sdpAnswer);
-		h.sendClient(sid, newKurentoMsg()
+		processor.getHandler().sendClient(sid, newKurentoMsg()
 				.put("id", "videoResponse")
 				.put("uid", this.uid)
 				.put("sdpAnswer", sdpAnswer));
-		log.debug("gather candidates");
-		endpoint.gatherCandidates();
 	}
 
-	private WebRtcEndpoint getEndpointForUser(final KurentoHandler h, String sid, String uid) {
+	private WebRtcEndpoint getEndpointForUser(final StreamProcessor processor, String sid, String uid) {
 		if (uid.equals(this.uid)) {
 			log.debug("PARTICIPANT {}: configuring loopback", this.uid);
 			return outgoingMedia;
 		}
 
 		log.debug("PARTICIPANT {}: receiving video from {}", uid, this.uid);
-
-		WebRtcEndpoint listener = listeners.get(uid);
-		if (listener == null) {
-			log.debug("PARTICIPANT {}: creating new endpoint for {}", uid, this.uid);
-			listener = createEndpoint(h, sid, uid);
-			listeners.put(uid, listener);
+		WebRtcEndpoint listener = listeners.remove(uid);
+		if (listener != null) {
+			log.debug("PARTICIPANT {}: re-started video receiving, will drop previous endpoint", uid);
+			listener.release();
 		}
+		log.debug("PARTICIPANT {}: creating new endpoint for {}", uid, this.uid);
+		listener = createEndpoint(processor, sid, uid);
+		listeners.put(uid, listener);
 
 		log.debug("PARTICIPANT {}: obtained endpoint for {}", uid, this.uid);
-		Client cur = h.getBySid(this.sid);
-		if (cur.hasActivity(Activity.broadcastA)) {
-			outgoingMedia.connect(listener, MediaType.AUDIO);
-		}
-		if (cur.hasActivity(Activity.broadcastV)) {
-			outgoingMedia.connect(listener, MediaType.VIDEO);
+		Client cur = processor.getBySid(this.sid);
+		if (cur == null) {
+			log.warn("Client for endpoint dooesn't exists");
+		} else {
+			StreamDesc sd = cur.getStream(this.uid);
+			if (sd == null) {
+				log.warn("Stream for endpoint dooesn't exists");
+			} else {
+				if (sd.hasActivity(Activity.AUDIO)) {
+					outgoingMedia.connect(listener, MediaType.AUDIO);
+				}
+				if (StreamType.SCREEN == streamType || sd.hasActivity(Activity.VIDEO)) {
+					outgoingMedia.connect(listener, MediaType.VIDEO);
+				}
+			}
 		}
 		return listener;
 	}
 
-	private WebRtcEndpoint createEndpoint(final KurentoHandler h, String sid, String uid) {
-		WebRtcEndpoint endpoint = new WebRtcEndpoint.Builder(room.pipeline).build();
+	private WebRtcEndpoint createEndpoint(final StreamProcessor processor, String sid, String uid) {
+		WebRtcEndpoint endpoint = createWebRtcEndpoint(room.getPipeline());
 		endpoint.addTag("outUid", this.uid);
 		endpoint.addTag("uid", uid);
 
-		endpoint.addIceCandidateFoundListener(new EventListener<IceCandidateFoundEvent>() {
-			@Override
-			public void onEvent(IceCandidateFoundEvent event) {
-				h.sendClient(sid, newKurentoMsg()
-						.put("id", "iceCandidate")
-						.put("uid", KStream.this.uid)
-						.put("candidate", convert(JsonUtils.toJsonObject(event.getCandidate()))));
-					}
-		});
+		endpoint.addIceCandidateFoundListener(evt -> processor.getHandler().sendClient(sid
+				, newKurentoMsg()
+					.put("id", "iceCandidate")
+					.put("uid", KStream.this.uid)
+					.put(PARAM_CANDIDATE, convert(JsonUtils.toJsonObject(evt.getCandidate()))))
+				);
 		return endpoint;
 	}
 
-	public void startRecord() {
-		final String chunkUid = String.format("rec_%s_%s", room.recordingId, randomUUID());
-		recorder = new RecorderEndpoint.Builder(room.pipeline, getRecUri(getRecordingChunk(room.roomId, chunkUid)))
-				.stopOnEndOfStream()
-				.withMediaProfile(profile).build();
+	public void startRecord(StreamProcessor processor) {
+		log.debug("startRecord outMedia OK ? {}", outgoingMedia != null);
+		if (outgoingMedia == null) {
+			release(processor, true);
+			return;
+		}
+		final String chunkUid = "rec_" + room.getRecordingId() + "_" + randomUUID();
+		recorder = createRecorderEndpoint(room.getPipeline(), getRecUri(getRecordingChunk(room.getRoomId(), chunkUid)), profile);
 		recorder.addTag("outUid", uid);
 		recorder.addTag("uid", uid);
 
-		recorder.addRecordingListener(new EventListener<RecordingEvent>() {
-			@Override
-			public void onEvent(RecordingEvent event) {
-				chunkId = room.chunkDao.start(room.recordingId, type, chunkUid, sid);
-			}
-		});
-		recorder.addStoppedListener(new EventListener<StoppedEvent>() {
-			@Override
-			public void onEvent(StoppedEvent event) {
-				room.chunkDao.stop(chunkId);
-			}
-		});
+		recorder.addRecordingListener(evt -> chunkId = room.getChunkDao().start(room.getRecordingId(), type, chunkUid, sid));
+		recorder.addStoppedListener(evt -> room.getChunkDao().stop(chunkId));
 		switch (profile) {
 			case WEBM:
 				outgoingMedia.connect(recorder, MediaType.AUDIO);
@@ -248,42 +260,47 @@ public class KStream implements IKStream {
 		}
 	}
 
-	public void stopBroadcast(final KurentoHandler h) {
-		release(h);
-		WebSocketHelper.sendAll(newKurentoMsg()
-				.put("id", "broadcastStopped")
-				.put("uid", uid)
-				.toString()
-			);
+	public void stopBroadcast(final StreamProcessor processor) {
+		room.onStopBroadcast(this, processor);
+	}
+
+	public void pauseSharing() {
+		releaseListeners();
+	}
+
+	private void releaseListeners() {
+		log.debug("PARTICIPANT {}: Releasing listeners", uid);
+		for (Entry<String, WebRtcEndpoint> entry : listeners.entrySet()) {
+			final String inUid = entry.getKey();
+			log.trace("PARTICIPANT {}: Released incoming EP for {}", uid, inUid);
+
+			final WebRtcEndpoint ep = entry.getValue();
+			ep.release(new Continuation<Void>() {
+				@Override
+				public void onSuccess(Void result) throws Exception {
+					log.trace("PARTICIPANT {}: Released successfully incoming EP for {}", KStream.this.uid, inUid);
+				}
+
+				@Override
+				public void onError(Throwable cause) throws Exception {
+					log.warn("PARTICIPANT {}: Could not release incoming EP for {}", KStream.this.uid, inUid);
+				}
+			});
+		}
+		listeners.clear();
 	}
 
 	@Override
-	public void release(KurentoHandler h) {
+	public void release(IStreamProcessor processor, boolean remove) {
 		if (outgoingMedia != null) {
-			log.debug("PARTICIPANT {}: Releasing resources", uid);
-			for (Entry<String, WebRtcEndpoint> entry : listeners.entrySet()) {
-				final String inUid = entry.getKey();
-				log.trace("PARTICIPANT {}: Released incoming EP for {}", uid, inUid);
-
-				final WebRtcEndpoint ep = entry.getValue();
-				ep.release(new Continuation<Void>() {
-					@Override
-					public void onSuccess(Void result) throws Exception {
-						log.trace("PARTICIPANT {}: Released successfully incoming EP for {}", KStream.this.uid, inUid);
-					}
-
-					@Override
-					public void onError(Throwable cause) throws Exception {
-						log.warn("PARTICIPANT {}: Could not release incoming EP for {}", KStream.this.uid, inUid);
-					}
-				});
-			}
-			listeners.clear();
+			releaseListeners();
 			outgoingMedia.release();
 			outgoingMedia = null;
 		}
 		releaseRecorder();
-		h.streamsByUid.remove(uid);
+		if (remove) {
+			processor.release(this);
+		}
 	}
 
 	private void releaseRecorder() {
@@ -310,10 +327,12 @@ public class KStream implements IKStream {
 		return new JSONObject(o.toString());
 	}
 
+	@Override
 	public String getSid() {
 		return sid;
 	}
 
+	@Override
 	public String getUid() {
 		return uid;
 	}

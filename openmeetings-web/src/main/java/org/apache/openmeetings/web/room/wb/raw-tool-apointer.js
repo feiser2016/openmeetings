@@ -1,9 +1,10 @@
 /* Licensed under the Apache License, Version 2.0 (the "License") http://www.apache.org/licenses/LICENSE-2.0 */
-var APointer = function(wb, s) {
+var APointer = function(wb, s, sBtn) {
 	const pointer = Base();
 	pointer.user = '';
 	pointer.create = function(canvas, o) {
 		fabric.Image.fromURL('./css/images/pointer.png', function(img) {
+			const scale = 1. / wb.getZoom();
 			img.set({
 				left:15
 				, originX: 'right'
@@ -34,6 +35,8 @@ var APointer = function(wb, s) {
 			const group = new fabric.Group([circle1, circle2, img, text], {
 				left: o.x - 20
 				, top: o.y - 20
+				, scaleX: scale
+				, scaleY: scale
 			});
 
 			canvas.add(group);
@@ -86,6 +89,7 @@ var APointer = function(wb, s) {
 			canvas.on('mouse:up', pointer.mouseUp);
 		});
 		ToolUtil.disableAllProps(s);
+		sBtn.addClass('disabled');
 	}
 	pointer.deactivate = function() {
 		wb.eachCanvas(function(canvas) {

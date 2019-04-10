@@ -1,13 +1,10 @@
 /* Licensed under the Apache License, Version 2.0 (the "License") http://www.apache.org/licenses/LICENSE-2.0 */
-var Clipart = function(wb, btn, s) {
-	const art = Shape(wb);
+var Clipart = function(wb, btn, s, sBtn) {
+	const art = Shape(wb, sBtn);
 	art.add2Canvas = function() {}
 	art.createShape = function(canvas) {
-		const imgSrc = btn.data('image');
-		fabric.Image.fromURL(imgSrc, function(img) {
-			art.orig.width = img.width;
-			art.orig.height = img.height;
-			art.obj = img.set({
+		const imgSrc = btn.data('image')
+			, opts = {
 				left: art.orig.x
 				, top: art.orig.y
 				, scaleX: 0.
@@ -15,9 +12,22 @@ var Clipart = function(wb, btn, s) {
 				, omType: 'Clipart'
 				, _src: imgSrc
 				, opacity: art.opacity
+			};
+		if (imgSrc.toLowerCase().endsWith('svg')) {
+			fabric.loadSVGFromURL(imgSrc, function(elements) {
+				art.orig.width = 32;
+				art.orig.height = 32;
+				art.obj = fabric.util.groupSVGElements(elements, opts);
+				canvas.add(art.obj);
 			});
-			canvas.add(art.obj);
-		});
+		} else {
+			fabric.Image.fromURL(imgSrc, function(img) {
+				art.orig.width = img.width;
+				art.orig.height = img.height;
+				art.obj = img.set(opts);
+				canvas.add(art.obj);
+			});
+		}
 	};
 	art.updateShape = function(pointer) {
 		if (!art.obj) {

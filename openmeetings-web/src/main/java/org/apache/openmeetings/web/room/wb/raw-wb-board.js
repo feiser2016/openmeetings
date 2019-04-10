@@ -2,9 +2,7 @@
 var Wb = function() {
 	const ACTIVE = 'active', BUMPER = 100, wb = {id: -1, name: ''}, canvases = []
 		, area = $('.room.wb.area .wb-area .tabs.ui-tabs'), bar = area.find('.wb-tabbar')
-		, extraProps = ['uid', 'fileId', 'fileType', 'count', 'slide', 'omType', '_src', 'formula']
-		, arrowImg = new Image();
-	arrowImg.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABwAAAAICAYAAADqSp8ZAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAygAAAMoBawMUsgAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAFsSURBVCiRrdI/SEJRFMfx37lPGxqKoGwxKJoaImhpCf8NEUFL9WgLUrPnIyEIa6reVEPQn0GeWDS4NDQETQ2JT4waojUoHBqCoJKWINB3720yIhGl+q7ncj5nuIQ6jWiaq1xmU4IwBACQ5GCAU5D8IECRAkUQzt8V++wmlSrX20e1BoFIrFdwHidIIQhH5O68sgzD/vnOF4m0QyijJGgMQIHZtJdJJ4oNg6qqNr20dKwBaOWKvZFPpZ7qXV3JH4wNSMbjJHGZ7XIlYRiiFkiBsL4CphwLwbck5E7uwMw3ClXD2iRImYYUq9lD886nLXZbyd2HL9AbXpglySOQeFVstpRJJ+5/i1UajkbbHCXahMS1ZAiS2+W1DMNmqqoqBLFMYIME1uxkvPRXDAAuTPMNhCwIGiT62eOzAQDkD+nbAjQDxudy+8mT/8C+FwjNjwuwdQnqY7b0kCesT7DC7allWVU/8D/zh3SdC/R8Aq9QhRc3h8LfAAAAAElFTkSuQmCC';
+		, extraProps = ['uid', 'fileId', 'fileType', 'count', 'slide', 'omType', '_src', 'formula'];
 	let a, t, z, s, f, mode, slide = 0, width = 0, height = 0
 			, zoom = 1., zoomMode = 'pageWidth', role = null;
 
@@ -17,9 +15,15 @@ var Wb = function() {
 	function _setActive() {
 		!!t && t.find('.om-icon.' + mode).addClass(ACTIVE);
 	}
+	function __validBtn(btn) {
+		return !!btn && btn.length === 1
+			&& typeof(btn.data) === 'function'
+			&& typeof(btn.data()) === 'object'
+			&& typeof(btn.data().deactivate) === 'function';
+	}
 	function _btnClick(toolType) {
 		const b = _getBtn();
-		if (b.length && b.hasClass(ACTIVE)) {
+		if (__validBtn(b)) {
 			b.data().deactivate();
 		}
 		_cleanActive();
@@ -28,6 +32,9 @@ var Wb = function() {
 	}
 	function _initToolBtn(m, def, obj) {
 		const btn = _getBtn(m);
+		if (!btn || btn.length === 0) {
+			return;
+		}
 		btn.data({
 			obj: obj
 			, toolType: m
@@ -76,23 +83,24 @@ var Wb = function() {
 		});
 		return c;
 	}
-	function _initTexts() {
+	function _initTexts(sBtn) {
 		const c = _initGroup('#wb-area-texts', _getBtn('apointer'));
-		_initToolBtn('text', false, Text(wb, s));
-		_initToolBtn('textbox', false, Textbox(wb, s));
+		_initToolBtn('text', false, Text(wb, s, sBtn));
+		_initToolBtn('textbox', false, Textbox(wb, s, sBtn));
 		_initGroupHandle(c);
 	}
-	function _initDrawings() {
+	function _initDrawings(sBtn) {
 		const c = _initGroup('#wb-area-drawings', t.find('.texts'));
-		_initToolBtn('paint', false, Paint(wb, s));
-		_initToolBtn('line', false, Line(wb, s));
-		_initToolBtn('uline', false, ULine(wb, s));
-		_initToolBtn('rect', false, Rect(wb, s));
-		_initToolBtn('ellipse', false, Ellipse(wb, s));
-		_initToolBtn('arrow', false, Arrow(wb, s));
+		_initToolBtn('eraser', false, Whiteout(wb, s, sBtn));
+		_initToolBtn('paint', false, Paint(wb, s, sBtn));
+		_initToolBtn('line', false, Line(wb, s, sBtn));
+		_initToolBtn('uline', false, ULine(wb, s, sBtn));
+		_initToolBtn('rect', false, Rect(wb, s, sBtn));
+		_initToolBtn('ellipse', false, Ellipse(wb, s, sBtn));
+		_initToolBtn('arrow', false, Arrow(wb, s, sBtn));
 		_initGroupHandle(c);
 	}
-	function _initCliparts() {
+	function _initCliparts(sBtn) {
 		const c = OmUtil.tmpl('#wb-area-cliparts');
 		t.find('.drawings').after(c);
 		c.find('.om-icon.clipart').each(function() {
@@ -101,7 +109,7 @@ var Wb = function() {
 				.click(function() {
 					_setCurrent(c, cur);
 				});
-			_initToolBtn(cur.data('mode'), false, Clipart(wb, cur, s));
+			_initToolBtn(cur.data('mode'), false, Clipart(wb, cur, s, sBtn));
 		});
 		_initGroupHandle(c);
 	}
@@ -130,7 +138,7 @@ var Wb = function() {
 		function setStyle(canvas, styleName, value) {
 			const o = canvas.getActiveObject();
 			if (o.setSelectionStyles && o.isEditing) {
-				let style = {};
+				const style = {};
 				style[styleName] = value;
 				o.setSelectionStyles(style);
 			} else {
@@ -252,7 +260,8 @@ var Wb = function() {
 			, containment: 'parent'
 			, scroll: false
 		});
-		const clearAll = t.find('.om-icon.clear-all');
+		const clearAll = t.find('.om-icon.clear-all')
+			, sBtn = t.find('.om-icon.settings');
 		let _firstToolItem = true;
 		switch (role) {
 			case PRESENTER:
@@ -271,16 +280,46 @@ var Wb = function() {
 					_setSlide(1 * slide + 1);
 					showCurrentSlide();
 				});
+				z.find('.settings-group').show().find('.settings').click(function () {
+					const wbs = $('#wb-settings')
+						, wbsw = wbs.find('.wbs-width').val(width)
+						, wbsh = wbs.find('.wbs-height').val(height);
+					function isNumeric(n) {
+						return !isNaN(parseInt(n)) && isFinite(n);
+					}
+					wbs.dialog({
+						buttons: [
+							{
+								text: wbs.data('btn-ok')
+								, click: function() {
+									const __w = wbsw.val(), __h = wbsh.val();
+									if (isNumeric(__w) && isNumeric(__h)) {
+										width = parseInt(__w);
+										height = parseInt(__h);
+										_sendSetSize();
+									}
+									$(this).dialog("close");
+								}
+							}
+							, {
+								text: wbs.data('btn-cancel')
+								, click: function() {
+									$(this).dialog("close");
+								}
+							}
+						]
+					});
+				});
 			case WHITEBOARD:
 				if (role === WHITEBOARD) {
 					clearAll.addClass('disabled');
 				}
-				_initToolBtn('pointer', _firstToolItem, Pointer(wb, s));
+				_initToolBtn('pointer', _firstToolItem, Pointer(wb, s, sBtn));
 				_firstToolItem = false;
-				_initTexts();
-				_initDrawings();
-				_initToolBtn('math', _firstToolItem, TMath(wb, s));
-				_initCliparts();
+				_initTexts(sBtn);
+				_initDrawings(sBtn);
+				_initToolBtn('math', _firstToolItem, TMath(wb, s, sBtn));
+				_initCliparts(sBtn);
 				t.find('.om-icon.settings').click(function() {
 					s.show();
 				});
@@ -343,22 +382,12 @@ var Wb = function() {
 						zoom = .1;
 					}
 					zoomMode = 'zoom';
-					_setSize();
-					wbAction('setSize', JSON.stringify({
-						wbId: wb.id
-						, zoom: zoom
-						, zoomMode: zoomMode
-					}));
+					_sendSetSize();
 				});
 				z.find('.zoom-in').click(function() {
 					zoom += .2;
 					zoomMode = 'zoom';
-					_setSize();
-					wbAction('setSize', JSON.stringify({
-						wbId: wb.id
-						, zoom: zoom
-						, zoomMode: zoomMode
-					}));
+					_sendSetSize();
 				});
 				z.find('.zoom').change(function() {
 					const zzz = $(this).val();
@@ -372,20 +401,29 @@ var Wb = function() {
 							case 'custom':
 								zoom = 1. * $(this).data('custom-val');
 								break;
+							default:
+								//no-op
 						}
 					} else {
 						zoom = 1. * zzz;
 					}
-					_setSize();
-					wbAction('setSize', JSON.stringify({
-						wbId: wb.id
-						, zoom: zoom
-						, zoomMode: zoomMode
-					}));
+					_sendSetSize();
 				});
 				_setSize();
-				_initToolBtn('apointer', _firstToolItem, APointer(wb, s));
+				_initToolBtn('apointer', _firstToolItem, APointer(wb, s, sBtn));
+			default:
+				//no-op
 		}
+	}
+	function _sendSetSize() {
+		_setSize();
+		wbAction('setSize', JSON.stringify({
+			wbId: wb.id
+			, zoom: zoom
+			, zoomMode: zoomMode
+			, width: width
+			, height: height
+		}));
 	}
 	function _findObject(o) {
 		let _o = null;
@@ -442,7 +480,7 @@ var Wb = function() {
 				_updateZoomPanel();
 				if (ccount !== canvases.length) {
 					const b = _getBtn();
-					if (b.length && b.hasClass(ACTIVE)) {
+					if (__validBtn(b)) {
 						b.data().deactivate();
 						b.data().activate();
 					}
@@ -492,13 +530,16 @@ var Wb = function() {
 				r.type = 'math';
 				delete r.objects;
 				break;
+			default:
+				//no-op
 		}
 		return r;
 	}
 	//events
 	function objCreatedHandler(o) {
-		if (role === NONE && o.type !== 'pointer') return;
-
+		if (role === NONE && o.type !== 'pointer') {
+			return;
+		}
 		let json;
 		switch(o.type) {
 			case 'pointer':
@@ -516,7 +557,9 @@ var Wb = function() {
 	};
 	function objAddedHandler(e) {
 		const o = e.target;
-		if (!!o.loaded) return;
+		if (!!o.loaded) {
+			return;
+		}
 		switch(o.type) {
 			case 'textbox':
 			case 'i-text':
@@ -531,8 +574,9 @@ var Wb = function() {
 	};
 	function objModifiedHandler(e) {
 		const o = e.target, items = [];
-		if (role === NONE && o.type !== 'pointer') return;
-
+		if (role === NONE && o.type !== 'pointer') {
+			return;
+		}
 		o.includeDefaultValues = false;
 		if ('activeSelection' === o.type) {
 			o.clone(function(_o) {
@@ -648,13 +692,6 @@ var Wb = function() {
 		a.find('.canvases').append(c);
 		const canvas = new fabric.Canvas(c.attr('id'), {
 			preserveObjectStacking: true
-			, controlCallback: {
-				mtr: function(ctx, left, top, size) {
-					const x = left + (size - arrowImg.width) / 2
-						, y = top + (size - arrowImg.height) / 2;
-					ctx.drawImage(arrowImg, x, y);
-				}
-			}
 		});
 		canvas.wbId = wb.id;
 		canvas.slide = sl;
@@ -676,11 +713,11 @@ var Wb = function() {
 	function _setSize() {
 		switch (zoomMode) {
 			case 'fullFit':
-				zoom = Math.min((area.width() - 10) / width, (area.height() - bar.height() - 10) / height);
+				zoom = Math.min((area.width() - 30) / width, (area.height() - bar.height() - 30) / height);
 				z.find('.zoom').val(zoomMode);
 				break;
 			case 'pageWidth':
-				zoom = (area.width() - 10) / width;
+				zoom = (area.width() - 30) / width;
 				z.find('.zoom').val(zoomMode);
 				break;
 			default:
@@ -712,15 +749,21 @@ var Wb = function() {
 			e.remove();
 		}
 	}
+	function __destroySettings() {
+		const wbs = $('#wb-settings');
+		if (wbs.dialog('instance')) {
+			wbs.dialog('destroy');
+		}
+	}
 
 	wb.setRole = function(_role) {
 		if (role !== _role) {
 			const btn = _getBtn();
-			if (!!btn && btn.length === 1) {
+			if (__validBtn(btn)) {
 				btn.data().deactivate();
 			}
 			a.find('.tools').remove();
-			a.find('.wb-settings').remove();
+			a.find('.wb-tool-settings').remove();
 			a.find('.wb-zoom').remove();
 			role = _role;
 			const sc = a.find('.scroll-container');
@@ -730,11 +773,12 @@ var Wb = function() {
 			__safeRemove(s);
 			__safeRemove(f);
 			if (role === NONE) {
-				t = OmUtil.tmpl('#wb-tools-readonly');
+				__destroySettings();
+				t = !!Room.getOptions().questions ? OmUtil.tmpl('#wb-tools-readonly') : a.find('invalid-wb-element');
 				sc.off('scroll', scrollHandler);
 			} else {
 				t = OmUtil.tmpl('#wb-tools');
-				s = OmUtil.tmpl('#wb-settings')
+				s = OmUtil.tmpl('#wb-tool-settings')
 					.attr('style', 'display: none; bottom: 100px; ' + (Settings.isRtl ? 'left' : 'right') + ': 100px;');
 				f = OmUtil.tmpl('#wb-formula')
 					.attr('style', 'display: none; bottom: 100px; ' + (Settings.isRtl ? 'left' : 'right') + ': 100px;');
@@ -744,10 +788,10 @@ var Wb = function() {
 			t.attr('style', 'position: absolute; top: 20px; ' + (Settings.isRtl ? 'left' : 'right') + ': 20px;');
 			a.append(t).append(z);
 			showCurrentSlide();
-			t = a.find('.tools'), s = a.find('.wb-settings');
+			t = a.find('.tools'), s = a.find('.wb-tool-settings');
 			wb.eachCanvas(function(canvas) {
 				setHandlers(canvas);
-				canvas.forEachObject(function(__o) { //TODO reduce iterations
+				canvas.forEachObject(function(__o) {
 					if (!!__o && __o.omType === 'Video') {
 						__o.setPlayable(role);
 					}
@@ -775,7 +819,7 @@ var Wb = function() {
 		_setSize();
 	}
 	wb.resize = function() {
-		if (t.position().left + t.width() > a.width()) {
+		if (t.length === 1 && t.position().left + t.width() > a.width()) {
 			t.position({
 				my: (Settings.isRtl ? 'left' : 'right')
 				, at: (Settings.isRtl ? 'left' : 'right') + '-20'
@@ -809,7 +853,7 @@ var Wb = function() {
 			}
 			switch(o.type) {
 				case 'pointer':
-					APointer().create(canvases[o.slide], o);
+					APointer(wb).create(canvases[o.slide], o);
 					break;
 				case 'video':
 					Player.create(canvases[o.slide], o, wb);
@@ -842,7 +886,7 @@ var Wb = function() {
 			const o = _arr[i];
 			switch(o.type) {
 				case 'pointer':
-					_modifyHandler(APointer().create(canvases[o.slide], o))
+					_modifyHandler(APointer(wb).create(canvases[o.slide], o))
 					break;
 				case 'video':
 				{
@@ -912,5 +956,11 @@ var Wb = function() {
 	wb.getFormula = function() {
 		return f;
 	};
+	wb.getZoom = function() {
+		return zoom;
+	}
+	wb.destroy = function() {
+		__destroySettings();
+	}
 	return wb;
 };

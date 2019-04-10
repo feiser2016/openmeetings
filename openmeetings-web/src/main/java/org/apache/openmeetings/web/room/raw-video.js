@@ -1,27 +1,20 @@
 /* Licensed under the Apache License, Version 2.0 (the "License") http://www.apache.org/licenses/LICENSE-2.0 */
 var Video = (function() {
-	const self = {};
+	const self = {}
+		, AudioCtx = window.AudioContext || window.webkitAudioContext;
 	let sd, v, vc, t, f, size, vol, slider, handle, video, rtcPeer
-		, lastVolume = 50, muted = false, aCtx, aSrc, aDest, gainNode
-		, lm, level, userSpeaks = false;
+		, lastVolume = 50, muted = false, aCtx, aSrc, aDest, gainNode, analyser
+		, lm, level, userSpeaks = false, muteOthers;
 
-	function _getName() {
-		return sd.user.firstName + ' ' + sd.user.lastName;
-	}
 	function _getExtra() {
 		return t.height() + 2 + (f.is(':visible') ? f.height() : 0);
-	}
-	function _resizeDlg(_w, _h) {
-		const h = _h + _getExtra();
-		_resizeDlgArea(_w, h);
-		return h;
 	}
 	function _resizeDlgArea(_w, _h) {
 		v.dialog('option', 'width', _w).dialog('option', 'height', _h);
 		const h = _h - _getExtra();
 		_resize(_w, h);
 		if (Room.getOptions().interview) {
-			v.dialog('widget').css(VideoUtil.getPos());
+			VideoUtil.setPos(v, VideoUtil.getPos());
 		}
 	}
 	function _resizePod() {
@@ -29,22 +22,64 @@ var Video = (function() {
 			, pw = p.width(), ph = p.height();
 		_resizeDlgArea(pw, ph);
 	}
+	function _resizeLm(h) {
+		if (!!lm) {
+			lm.attr('height', h).height(h);
+		}
+		return lm;
+	}
 	function _resize(w, h) {
 		vc.width(w).height(h);
-		if (!!lm) {
-			lm.height(h - 10);
-		}
+		_resizeLm(h - 10);
 		video.width(w).height(h);
 	}
 	function _micActivity(level) {
-		lm.getKendoProgressBar().value(140 * level); // magic number
-		let speaks = level > .02;
+		const speaks = level > 5;
 		if (speaks !== userSpeaks) {
 			userSpeaks = speaks;
 			OmUtil.sendMessage({type: 'mic', id: 'activity', active: speaks});
 		}
 	}
-	function _createSendPeer(msg) {
+	function _getScreenStream(msg, callback) {
+		function __handleScreenError(err) {
+			VideoManager.sendMessage({id: 'errorSharing'});
+			Sharer.setShareState(SHARE_STOPED);
+			Sharer.setRecState(SHARE_STOPED);
+			OmUtil.error(err);
+		}
+		const b = kurentoUtils.WebRtcPeer.browser;
+		let promise, cnts;
+		if (VideoUtil.isEdge(b) && b.major > 16) {
+			cnts = {
+				video: true
+			};
+			promise = navigator.getDisplayMedia(cnts);
+		} else if (b.name === 'Firefox') {
+			// https://mozilla.github.io/webrtc-landing/gum_test.html
+			cnts = Sharer.baseConstraints(sd);
+			cnts.video.mediaSource = sd.shareType;
+			promise = navigator.mediaDevices.getUserMedia(cnts);
+		} else if (VideoUtil.isChrome72(b)) {
+			cnts = {
+				video: true
+			};
+			promise = navigator.mediaDevices.getDisplayMedia(cnts);
+		} else if (VideoUtil.isChrome(b)) {
+			promise = Sharer.getChromeConstraints(sd).then((_cnts) => {
+				cnts = _cnts;
+				return navigator.mediaDevices.getUserMedia(_cnts);
+			});
+		} else {
+			promise = new Promise(() => {
+				Sharer.close();
+				throw 'Screen-sharing is not supported in ' + b.name + '[' + b.major + ']';
+			});
+		}
+		promise.then(function(stream) {
+			callback(msg, cnts, stream);
+		}).catch(__handleScreenError);
+	}
+	function _getVideoStream(msg, callback) {
 		VideoSettings.constraints(sd, function(cnts) {
 			if ((VideoUtil.hasVideo(sd) && !cnts.video) || (VideoUtil.hasAudio(sd) && !cnts.audio)) {
 				VideoManager.sendMessage({
@@ -55,7 +90,7 @@ var Video = (function() {
 				});
 			}
 			if (!cnts.audio && !cnts.video) {
-				OmUtil.error("Requested devices are not available");
+				OmUtil.error('Requested devices are not available');
 				VideoManager.close(sd.uid)
 				return;
 			}
@@ -64,18 +99,20 @@ var Video = (function() {
 					let _stream = stream;
 					if (stream.getAudioTracks().length !== 0) {
 						vol.show();
-						lm = vc.find('.level-meter')
-							.kendoProgressBar({ value: 0, showStatus: false, orientation: 'vertical' });
-						lm.height(vc.height() - 10);
-						aCtx = new AudioContext();
+						lm = vc.find('.level-meter');
+						_resizeLm(vc.height() - 10).show();
+						aCtx = new AudioCtx();
 						gainNode = aCtx.createGain();
+						analyser = aCtx.createAnalyser();
 						aSrc = aCtx.createMediaStreamSource(stream);
 						aSrc.connect(gainNode);
+						gainNode.connect(analyser);
 						if (VideoUtil.isEdge()) {
-							gainNode.connect(aCtx.destination);
+							analyser.connect(aCtx.destination);
 						} else {
 							aDest = aCtx.createMediaStreamDestination();
-							gainNode.connect(aDest);
+							analyser.connect(aDest);
+							aSrc.origStream = stream;
 							_stream = aDest.stream;
 							stream.getVideoTracks().forEach(function(track) {
 								_stream.addTrack(track);
@@ -83,37 +120,68 @@ var Video = (function() {
 						}
 						_handleVolume(lastVolume);
 					}
-					const options = VideoUtil.addIceServers({
-						localVideo: video[0]
-						, videoStream: _stream
-						, mediaConstraints: cnts
-						, onicecandidate: self.onIceCandidate
-					}, msg);
-					rtcPeer = new kurentoUtils.WebRtcPeer.WebRtcPeerSendonly(
-						options
-						, function (error) {
-							if (error) {
-								return OmUtil.error(error);
-							}
-							level = MicLevel();
-							level.meter(rtcPeer, _micActivity, OmUtil.error);
-							this.generateOffer(function(error, offerSdp) {
-								if (error) {
-									return OmUtil.error('Sender sdp offer error ' + error);
-								}
-								OmUtil.log('Invoking Sender SDP offer callback function');
-								VideoManager.sendMessage({
-									id : 'broadcastStarted'
-									, uid: sd.uid
-									, sdpOffer: offerSdp
-								});
-							});
-						});
+					callback(msg, cnts, _stream);
 				})
 				.catch(function(err) {
-					OmUtil.error(err);
+					VideoManager.sendMessage({
+						id : 'devicesAltered'
+						, uid: sd.uid
+						, audio: false
+						, video: false
+					});
+					VideoManager.close(sd.uid);
+					if ('NotReadableError' === err.name) {
+						OmUtil.error('Camera/Microphone is busy and can\'t be used');
+					} else {
+						OmUtil.error(err);
+					}
 				});
 		});
+	}
+	function __createSendPeer(msg, cnts, stream) {
+		const options = {
+			videoStream: stream
+			, mediaConstraints: cnts
+			, onicecandidate: self.onIceCandidate
+		};
+		if (!VideoUtil.isSharing(sd)) {
+			options.localVideo = video[0];
+		}
+		rtcPeer = new kurentoUtils.WebRtcPeer.WebRtcPeerSendonly(
+			VideoUtil.addIceServers(options, msg)
+			, function (error) {
+				if (error) {
+					return OmUtil.error(error);
+				}
+				if (!!analyser) {
+					level = MicLevel();
+					level.meter(analyser, lm, _micActivity, OmUtil.error);
+				}
+				this.generateOffer(function(error, offerSdp) {
+					if (error) {
+						return OmUtil.error('Sender sdp offer error ' + error);
+					}
+					OmUtil.log('Invoking Sender SDP offer callback function');
+					VideoManager.sendMessage({
+						id : 'broadcastStarted'
+						, uid: sd.uid
+						, sdpOffer: offerSdp
+					});
+					if (VideoUtil.isSharing(sd)) {
+						Sharer.setShareState(SHARE_STARTED);
+					}
+					if (VideoUtil.isRecording(sd)) {
+						Sharer.setRecState(SHARE_STARTED);
+					}
+				});
+			});
+	}
+	function _createSendPeer(msg) {
+		if (VideoUtil.isSharing(sd) || VideoUtil.isRecording(sd)) {
+			_getScreenStream(msg, __createSendPeer);
+		} else {
+			_getVideoStream(msg, __createSendPeer);
+		}
 	}
 	function _createResvPeer(msg) {
 		const options = VideoUtil.addIceServers({
@@ -123,7 +191,7 @@ var Video = (function() {
 		rtcPeer = new kurentoUtils.WebRtcPeer.WebRtcPeerRecvonly(
 			options
 			, function(error) {
-				if (error) {
+				if (!this.cleaned && error) {
 					return OmUtil.error(error);
 				}
 				this.generateOffer(function(error, offerSdp) {
@@ -140,7 +208,7 @@ var Video = (function() {
 			});
 	}
 	function _handleMicStatus(state) {
-		if (!f.is(':visible')) {
+		if (!f || !f.is(':visible')) {
 			return;
 		}
 		if (state) {
@@ -203,8 +271,11 @@ var Video = (function() {
 		} else {
 			contSel = '.room.box';
 		}
-		$(contSel).append(OmUtil.tmpl('#user-video', _id).attr('title', name)
-				.attr('data-client-uid', sd.type + sd.cuid).data(self));
+		$(contSel).append(OmUtil.tmpl('#user-video', _id)
+				.attr('title', name)
+				.attr('data-client-uid', sd.cuid)
+				.attr('data-client-type', sd.type)
+				.data(self));
 		return contSel;
 	}
 	function _initDialog(v, opts) {
@@ -240,89 +311,104 @@ var Video = (function() {
 			});
 		}
 	}
+	function _initCamDialog() {
+		v.parent().find('.ui-dialog-titlebar-buttonpane')
+			.append($('#video-volume-btn').children().clone())
+			.append($('#video-refresh-btn').children().clone());
+		const volume = v.parent().find('.dropdown-menu.video.volume');
+		slider = v.parent().find('.slider');
+		vol = v.parent().find('.ui-dialog-titlebar-volume')
+			.on('mouseenter', function(e) {
+				e.stopImmediatePropagation();
+				volume.toggle();
+			})
+			.click(function(e) {
+				e.stopImmediatePropagation();
+				roomAction('mute', JSON.stringify({uid: sd.uid, mute: !muted}));
+				_mute(!muted);
+				volume.hide();
+				return false;
+			}).dblclick(function(e) {
+				e.stopImmediatePropagation();
+				return false;
+			});
+		v.parent().find('.ui-dialog-titlebar-refresh')
+			.click(function(e) {
+				e.stopImmediatePropagation();
+				_refresh();
+				return false;
+			}).dblclick(function(e) {
+				e.stopImmediatePropagation();
+				return false;
+			});
+		volume.on('mouseleave', function() {
+			$(this).hide();
+		});
+		handle = v.parent().find('.slider .handle');
+		slider.slider({
+			orientation: 'vertical'
+			, range: 'min'
+			, min: 0
+			, max: 100
+			, value: lastVolume
+			, create: function() {
+				handle.text($(this).slider('value'));
+			}
+			, slide: function(event, ui) {
+				_handleVolume(ui.value);
+			}
+		});
+		vol.hide();
+	}
 	function _init(msg) {
 		sd = msg.stream;
 		sd.activities = sd.activities.sort();
 		size = {width: sd.width, height: sd.height};
 		const _id = VideoUtil.getVid(sd.uid)
-			, name = _getName()
+			, name = sd.user.displayName
 			, _w = sd.width
 			, _h = sd.height
+			, isSharing = VideoUtil.isSharing(sd)
+			, isRecording = VideoUtil.isRecording(sd)
 			, opts = Room.getOptions();
 		sd.self = sd.cuid === opts.uid;
 		const contSel = _initContainer(_id, name, opts);
 		v = $('#' + _id);
-		v.dialog({
-			classes: {
-				'ui-dialog': 'ui-corner-all video user-video' + (opts.showMicStatus ? ' mic-status' : '')
-				, 'ui-dialog-titlebar': 'ui-corner-all' + (opts.showMicStatus ? ' ui-state-highlight' : '')
-			}
-			, width: _w
-			, minWidth: 40
-			, minHeight: 50
-			, autoOpen: true
-			, modal: false
-			, appendTo: contSel
-		});
-		_initDialog(v, opts);
-		t = v.parent().find('.ui-dialog-titlebar').attr('title', name);
 		f = v.find('.footer');
-		if (!VideoUtil.isSharing(sd)) {
-			v.parent().find('.ui-dialog-titlebar-buttonpane')
-				.append($('#video-volume-btn').children().clone())
-				.append($('#video-refresh-btn').children().clone());
-			const volume = v.parent().find('.dropdown-menu.video.volume');
-			slider = v.parent().find('.slider');
-			vol = v.parent().find('.ui-dialog-titlebar-volume')
-				.on('mouseenter', function(e) {
-					e.stopImmediatePropagation();
-					volume.toggle();
-				})
-				.click(function(e) {
-					e.stopImmediatePropagation();
-					roomAction('mute', JSON.stringify({uid: sd.uid, mute: !muted}));
-					_mute(!muted);
-					volume.hide();
-					return false;
-				}).dblclick(function(e) {
-					e.stopImmediatePropagation();
-					return false;
-				});
-			v.parent().find('.ui-dialog-titlebar-refresh')
-				.click(function(e) {
-					e.stopImmediatePropagation();
-					_refresh();
-					return false;
-				}).dblclick(function(e) {
-					e.stopImmediatePropagation();
-					return false;
-				});
-			volume.on('mouseleave', function() {
-				$(this).hide();
-			});
-			handle = v.parent().find('.slider .handle');
-			slider.slider({
-				orientation: 'vertical'
-				, range: 'min'
-				, min: 0
-				, max: 100
-				, value: lastVolume
-				, create: function() {
-					handle.text($(this).slider('value'));
-				}
-				, slide: function(event, ui) {
-					_handleVolume(ui.value);
-				}
-			});
-			vol.hide();
+		if (!sd.self && isSharing) {
+			Sharer.close();
 		}
-		v.on("remove", _cleanup);
+		if (sd.self && (isSharing || isRecording)) {
+			v.hide();
+		} else {
+			v.dialog({
+				classes: {
+					'ui-dialog': 'ui-corner-all video user-video' + (opts.showMicStatus ? ' mic-status' : '')
+					, 'ui-dialog-titlebar': 'ui-corner-all' + (opts.showMicStatus ? ' ui-state-highlight' : '')
+				}
+				, width: _w
+				, minWidth: 40
+				, minHeight: 50
+				, autoOpen: true
+				, modal: false
+				, appendTo: contSel
+			});
+			_initDialog(v, opts);
+		}
+		if (!isSharing && !isRecording) {
+			_initCamDialog();
+		}
+		t = v.parent().find('.ui-dialog-titlebar').attr('title', name);
+		v.on('remove', _cleanup);
 		vc = v.find('.video');
 		vc.width(_w).height(_h);
+		muteOthers = vc.find('.mute-others');
 
 		_refresh(msg);
 
-		v.dialog('widget').css(VideoUtil.getPos(VideoUtil.getRects(VID_SEL), sd.width, sd.height + 25));
+		if (!isSharing && !isRecording) {
+			VideoUtil.setPos(v, VideoUtil.getPos(VideoUtil.getRects(VID_SEL), sd.width, sd.height + 25));
+		}
 		return v;
 	}
 	function _update(_c) {
@@ -330,7 +416,7 @@ var Video = (function() {
 		sd.activities = _c.activities.sort();
 		sd.user.firstName = _c.user.firstName;
 		sd.user.lastName = _c.user.lastName;
-		const name = _getName();
+		const name = sd.user.displayName;
 		v.dialog('option', 'title', name).parent().find('.ui-dialog-titlebar').attr('title', name);
 		const same = prevA.length === sd.activities.length && prevA.every(function(value, index) { return value === sd.activities[index]})
 		if (sd.self && !same) {
@@ -340,15 +426,14 @@ var Video = (function() {
 	function _refresh(msg) {
 		_cleanup();
 		const _id = VideoUtil.getVid(sd.uid);
-		const hasVideo = VideoUtil.hasVideo(sd)
-			, imgUrl = 'profile/' + sd.user.id + '?anti=' + new Date().getTime();  //TODO add normal URL ????
+		const hasVideo = VideoUtil.hasVideo(sd) || VideoUtil.isSharing(sd) || VideoUtil.isRecording(sd);
 		video = $(hasVideo ? '<video>' : '<audio>').attr('id', 'vid' + _id)
 			.width(vc.width()).height(vc.height())
 			.prop('autoplay', true).prop('controls', false);
 		if (hasVideo) {
-			video.attr('poster', imgUrl);
+			video.attr('poster', sd.user.pictureUri);
 		} else {
-			vc.addClass('audio-only').css('background-image', 'url(' + imgUrl + ')');
+			vc.addClass('audio-only').css('background-image', 'url(' + sd.user.pictureUri + ')');
 		}
 		vc.append(video);
 		const hasAudio = VideoUtil.hasAudio(sd);
@@ -358,47 +443,64 @@ var Video = (function() {
 		} else {
 			_createResvPeer(msg);
 		}
-		if (hasAudio) {
-			vol.show();
-			_mute(muted);
-		} else {
-			vol.hide();
-			v.parent().find('.dropdown-menu.video.volume').hide();
+		if (vol) {
+			if (hasAudio) {
+				vol.show();
+				_mute(muted);
+			} else {
+				vol.hide();
+				v.parent().find('.dropdown-menu.video.volume').hide();
+			}
 		}
 	}
-	function _setRights(_r) {
+	function _setRights() {
+		if (Room.hasRight(['superModerator', 'moderator', 'muteOthers']) && VideoUtil.hasAudio(sd)) {
+			muteOthers.addClass('enabled').click(function() {
+				VideoManager.clickMuteOthers(sd.uid);
+			});
+		} else {
+			muteOthers.removeClass('enabled').off();
+		}
 	}
 	function _cleanup() {
 		OmUtil.log('Disposing participant ' + sd.uid);
+		if (!!analyser) {
+			VideoUtil.disconnect(analyser);
+			analyser = null;
+		}
 		if (!!gainNode) {
-			gainNode.disconnect();
+			VideoUtil.disconnect(gainNode);
 			gainNode = null;
 		}
 		if (!!aSrc) {
 			VideoUtil.cleanStream(aSrc.mediaStream);
-			aSrc.disconnect();
+			VideoUtil.cleanStream(aSrc.origStream);
+			VideoUtil.disconnect(aSrc);
 			aSrc = null;
 		}
 		if (!!aDest) {
-			aDest.disconnect();
+			VideoUtil.disconnect(aDest);
 			aDest = null;
 		}
 		if (!!aCtx) {
 			if (!!aCtx.destination) {
-				aCtx.destination.disconnect();
+				VideoUtil.disconnect(aCtx.destination);
 			}
 			aCtx.close();
 			aCtx = null;
 		}
 		if (!!video && video.length > 0) {
-			VideoUtil.cleanStream(video[0].srcObject);
-			video[0].srcObject = null;
-			video.remove();
+			video.attr('id', 'dummy');
+			const vidNode = video[0];
+			VideoUtil.cleanStream(vidNode.srcObject);
+			vidNode.srcObject = null;
+			vidNode.parentNode.removeChild(vidNode);
 			video = null;
 		}
 		if (!!lm && lm.length > 0) {
 			_micActivity(0);
 			lm.hide();
+			muteOthers.removeClass('enabled').off();
 		}
 		if (!!level) {
 			level.dispose();
@@ -423,7 +525,7 @@ var Video = (function() {
 	self.getPeer = function() { return rtcPeer; };
 	self.onIceCandidate = function(candidate) {
 		const opts = Room.getOptions();
-		OmUtil.log("Local candidate" + JSON.stringify(candidate));
+		OmUtil.log('Local candidate ' + JSON.stringify(candidate));
 		VideoManager.sendMessage({
 			id: 'onIceCandidate'
 			, candidate: candidate

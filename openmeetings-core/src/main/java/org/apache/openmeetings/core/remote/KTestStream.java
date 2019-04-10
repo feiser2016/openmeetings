@@ -19,8 +19,9 @@
 package org.apache.openmeetings.core.remote;
 
 import static java.util.UUID.randomUUID;
-import static org.apache.openmeetings.core.remote.KurentoHandler.newTestKurentoMsg;
+import static org.apache.openmeetings.core.remote.KurentoHandler.PARAM_CANDIDATE;
 import static org.apache.openmeetings.core.remote.KurentoHandler.sendError;
+import static org.apache.openmeetings.core.remote.TestStreamProcessor.newTestKurentoMsg;
 import static org.apache.openmeetings.util.OmFileHelper.EXTENSION_WEBM;
 import static org.apache.openmeetings.util.OmFileHelper.TEST_SETUP_PREFIX;
 import static org.apache.openmeetings.util.OmFileHelper.getStreamsDir;
@@ -35,69 +36,53 @@ import org.apache.openmeetings.core.util.WebSocketHelper;
 import org.apache.openmeetings.db.entity.basic.IWsClient;
 import org.apache.openmeetings.util.OmFileHelper;
 import org.kurento.client.Continuation;
-import org.kurento.client.EndOfStreamEvent;
-import org.kurento.client.ErrorEvent;
-import org.kurento.client.EventListener;
 import org.kurento.client.IceCandidate;
-import org.kurento.client.IceCandidateFoundEvent;
 import org.kurento.client.MediaPipeline;
 import org.kurento.client.MediaProfileSpecType;
-import org.kurento.client.MediaSessionStartedEvent;
 import org.kurento.client.MediaType;
 import org.kurento.client.PlayerEndpoint;
 import org.kurento.client.RecorderEndpoint;
-import org.kurento.client.RecordingEvent;
-import org.kurento.client.StoppedEvent;
 import org.kurento.client.WebRtcEndpoint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.github.openjson.JSONObject;
 
-public class KTestStream implements IKStream {
-	private final static Logger log = LoggerFactory.getLogger(KTestStream.class);
+public class KTestStream extends AbstractStream {
+	private static final Logger log = LoggerFactory.getLogger(KTestStream.class);
 	private MediaPipeline pipeline;
 	private WebRtcEndpoint webRtcEndpoint;
 	private PlayerEndpoint player;
 	private RecorderEndpoint recorder;
 	private String recPath = null;
 	private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-	private final String uid;
 	private ScheduledFuture<?> recHandle;
 	private int recTime;
 
-	public KTestStream(final KurentoHandler h, IWsClient _c, JSONObject msg, MediaPipeline pipeline) {
+	public KTestStream(IWsClient c, JSONObject msg, MediaPipeline pipeline) {
+		super(null, c.getUid());
 		this.pipeline = pipeline;
-		this.uid = _c.getUid();
-		webRtcEndpoint = new WebRtcEndpoint.Builder(pipeline).build();
+		webRtcEndpoint = createWebRtcEndpoint(pipeline);
 		webRtcEndpoint.connect(webRtcEndpoint);
 
 		MediaProfileSpecType profile = getProfile(msg);
 		initRecPath();
-		recorder = new RecorderEndpoint.Builder(pipeline, recPath)
-				.stopOnEndOfStream()
-				.withMediaProfile(profile).build();
+		recorder = createRecorderEndpoint(pipeline, recPath, profile);
 
-		recorder.addRecordingListener(new EventListener<RecordingEvent>() {
-			@Override
-			public void onEvent(RecordingEvent event) {
+		recorder.addRecordingListener(evt -> {
 				recTime = 0;
 				recHandle = scheduler.scheduleAtFixedRate(
-						() -> WebSocketHelper.sendClient(_c, newTestKurentoMsg().put("id", "recording").put("time", recTime++))
+						() -> WebSocketHelper.sendClient(c, newTestKurentoMsg().put("id", "recording").put("time", recTime++))
 						, 0, 1, TimeUnit.SECONDS);
 				scheduler.schedule(() -> {
 						recorder.stop();
 						recHandle.cancel(true);
 					}, 5, TimeUnit.SECONDS);
-			}
-		});
-		recorder.addStoppedListener(new EventListener<StoppedEvent>() {
-			@Override
-			public void onEvent(StoppedEvent event) {
-				WebSocketHelper.sendClient(_c, newTestKurentoMsg().put("id", "recStopped"));
-				release(h);
-			}
-		});
+			});
+		recorder.addStoppedListener(evt -> {
+				WebSocketHelper.sendClient(c, newTestKurentoMsg().put("id", "recStopped"));
+				releaseRecorder();
+			});
 		switch (profile) {
 			case WEBM:
 				webRtcEndpoint.connect(recorder, MediaType.AUDIO);
@@ -117,9 +102,9 @@ public class KTestStream implements IKStream {
 		String sdpOffer = msg.getString("sdpOffer");
 		String sdpAnswer = webRtcEndpoint.processOffer(sdpOffer);
 
-		addIceListener(_c);
+		addIceListener(c);
 
-		WebSocketHelper.sendClient(_c, newTestKurentoMsg()
+		WebSocketHelper.sendClient(c, newTestKurentoMsg()
 				.put("id", "startResponse")
 				.put("sdpAnswer", sdpAnswer));
 		webRtcEndpoint.gatherCandidates();
@@ -131,38 +116,29 @@ public class KTestStream implements IKStream {
 
 			@Override
 			public void onError(Throwable cause) throws Exception {
-				sendError(_c, "Failed to start recording");
+				sendError(c, "Failed to start recording");
 				log.error("Failed to start recording", cause);
 			}
 		});
 	}
 
-	public void play(final KurentoHandler h, final IWsClient _c, JSONObject msg, MediaPipeline pipeline) {
+	public void play(final IWsClient _c, JSONObject msg, MediaPipeline pipeline) {
 		this.pipeline = pipeline;
-		webRtcEndpoint = new WebRtcEndpoint.Builder(pipeline).build();
-		player = new PlayerEndpoint.Builder(pipeline, recPath).build();
+		webRtcEndpoint = createWebRtcEndpoint(pipeline);
+		player = createPlayerEndpoint(pipeline, recPath);
 		player.connect(webRtcEndpoint);
-		webRtcEndpoint.addMediaSessionStartedListener(new EventListener<MediaSessionStartedEvent>() {
-			@Override
-			public void onEvent(MediaSessionStartedEvent event) {
-				log.info("Media session started {}", event);
-				player.addErrorListener(new EventListener<ErrorEvent>() {
-					@Override
-					public void onEvent(ErrorEvent event) {
+		webRtcEndpoint.addMediaSessionStartedListener(evt -> {
+				log.info("Media session started {}", evt);
+				player.addErrorListener(event -> {
 						log.info("ErrorEvent for player with uid '{}': {}", _c.getUid(), event.getDescription());
-						sendPlayEnd(h, _c);
-					}
-				});
-				player.addEndOfStreamListener(new EventListener<EndOfStreamEvent>() {
-					@Override
-					public void onEvent(EndOfStreamEvent event) {
+						sendPlayEnd(_c);
+					});
+				player.addEndOfStreamListener(event -> {
 						log.info("EndOfStreamEvent for player with uid '{}'", _c.getUid());
-						sendPlayEnd(h, _c);
-					}
-				});
+						sendPlayEnd(_c);
+					});
 				player.play();
-			}
-		});
+			});
 
 		String sdpOffer = msg.getString("sdpOffer");
 		String sdpAnswer = webRtcEndpoint.processOffer(sdpOffer);
@@ -183,27 +159,25 @@ public class KTestStream implements IKStream {
 	}
 
 	private void addIceListener(IWsClient _c) {
-		webRtcEndpoint.addIceCandidateFoundListener(new EventListener<IceCandidateFoundEvent>() {
-			@Override
-			public void onEvent(IceCandidateFoundEvent event) {
-				IceCandidate cand = event.getCandidate();
+		webRtcEndpoint.addIceCandidateFoundListener(evt -> {
+				IceCandidate cand = evt.getCandidate();
 				WebSocketHelper.sendClient(_c, newTestKurentoMsg()
 						.put("id", "iceCandidate")
-						.put("candidate", new JSONObject()
-								.put("candidate", cand.getCandidate())
+						.put(PARAM_CANDIDATE, new JSONObject()
+								.put(PARAM_CANDIDATE, cand.getCandidate())
 								.put("sdpMid", cand.getSdpMid())
 								.put("sdpMLineIndex", cand.getSdpMLineIndex())));
-			}
-		});
+			});
 	}
 
-	private void sendPlayEnd(final KurentoHandler h, IWsClient _c) {
+	private void sendPlayEnd(IWsClient _c) {
 		WebSocketHelper.sendClient(_c, newTestKurentoMsg().put("id", "playStopped"));
-		release(h);
+		releasePlayer();
 	}
 
 	private static MediaProfileSpecType getProfile(JSONObject msg) {
-		boolean a  = msg.getBoolean("audio"), v = msg.getBoolean("video");
+		boolean a  = msg.getBoolean("audio")
+				, v = msg.getBoolean("video");
 		if (a && v) {
 			return MediaProfileSpecType.WEBM;
 		} else if (v) {
@@ -218,24 +192,37 @@ public class KTestStream implements IKStream {
 		recPath = OmFileHelper.getRecUri(f);
 	}
 
-	@Override
-	public void release(KurentoHandler h) {
-		if (webRtcEndpoint != null) {
-			webRtcEndpoint.release();
-			webRtcEndpoint = null;
-		}
+	private void releasePipeline() {
 		if (pipeline != null) {
 			pipeline.release();
 			pipeline = null;
 		}
-		if (player != null) {
-			player.release();
-			player = null;
-		}
+	}
+
+	private void releaseRecorder() {
+		releasePipeline();
 		if (recorder != null) {
 			recorder.release();
 			recorder = null;
 		}
-		h.testsByUid.remove(uid);
+	}
+
+	private void releasePlayer() {
+		releasePipeline();
+		if (player != null) {
+			player.release();
+			player = null;
+		}
+	}
+
+	@Override
+	public void release(IStreamProcessor processor, boolean remove) {
+		if (webRtcEndpoint != null) {
+			webRtcEndpoint.release();
+			webRtcEndpoint = null;
+		}
+		releasePlayer();
+		releaseRecorder();
+		processor.release(this);
 	}
 }

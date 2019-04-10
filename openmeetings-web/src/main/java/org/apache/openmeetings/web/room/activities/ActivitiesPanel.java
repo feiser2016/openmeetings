@@ -48,6 +48,7 @@ import org.apache.wicket.spring.injection.annot.SpringBean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.openjson.JSONArray;
 import com.github.openjson.JSONObject;
 
 public class ActivitiesPanel extends Panel {
@@ -87,7 +88,7 @@ public class ActivitiesPanel extends Panel {
 				}
 				switch (act) {
 					case close:
-						remove(id, target);
+						remove(target, id);
 						break;
 					case decline:
 						if (room.getClient().hasRight(Right.moderator)) {
@@ -126,9 +127,9 @@ public class ActivitiesPanel extends Panel {
 									sendRoom(getRemoveMsg(id));
 									room.allowRight(client, Right.audio);
 									break;
-								case reqRightExclusive:
+								case reqRightMuteOthers:
 									sendRoom(getRemoveMsg(id));
-									room.allowRight(client, Right.exclusive);
+									room.allowRight(client, Right.muteOthers);
 									break;
 								default:
 									break;
@@ -159,13 +160,26 @@ public class ActivitiesPanel extends Panel {
 		add(action);
 	}
 
+	private boolean shouldSkip(final boolean self, final Activity a) {
+		return !self && a.getType().isAction() && !room.getClient().hasRight(Right.moderator);
+	}
+
 	public void add(Activity a, IPartialPageRequestHandler handler) {
 		if (!isVisible()) {
 			return;
 		}
+		final boolean self = getUserId().equals(a.getSender());
+		if (shouldSkip(self, a)) {
+			return;
+		}
+		if (a.getType().isAction()) {
+			remove(handler, activities.entrySet().parallelStream()
+				.filter(e -> a.getSender().equals(e.getValue().getSender()) && a.getType() == e.getValue().getType())
+				.map(e -> e.getValue().getId())
+				.toArray(String[]::new));
+		}
 		activities.put(a.getId(), a);
 		String text = "";
-		final boolean self = getUserId().equals(a.getSender());
 		final String name = self ? getString("1362") : a.getName();
 		final String fmt = ((BasePage)getPage()).isRtl() ? ACTIVITY_FMT_RTL : ACTIVITY_FMT;
 		switch (a.getType()) {
@@ -196,8 +210,8 @@ public class ActivitiesPanel extends Panel {
 			case reqRightAv:
 				text = String.format(fmt, name, getString("activities.request.right.video"), df.format(a.getCreated()));
 				break;
-			case reqRightExclusive:
-				text = String.format(fmt, name, getString("activities.request.right.exclusive"), df.format(a.getCreated()));
+			case reqRightMuteOthers:
+				text = String.format(fmt, name, getString("activities.request.right.muteothers"), df.format(a.getCreated()));
 				break;
 			case haveQuestion:
 				text = String.format(fmt, name, getString("activities.ask.question"), df.format(a.getCreated()));
@@ -208,6 +222,7 @@ public class ActivitiesPanel extends Panel {
 			.put("uid", a.getUid())
 			.put("cssClass", getClass(a))
 			.put("text", text)
+			.put("action", a.getType().isAction())
 			.put("find", false);
 
 		switch (a.getType()) {
@@ -218,7 +233,7 @@ public class ActivitiesPanel extends Panel {
 			case reqRightRemote:
 			case reqRightA:
 			case reqRightAv:
-			case reqRightExclusive:
+			case reqRightMuteOthers:
 				aobj.put("accept", room.getClient().hasRight(Right.moderator));
 				aobj.put("decline", room.getClient().hasRight(Right.moderator));
 				break;
@@ -233,9 +248,16 @@ public class ActivitiesPanel extends Panel {
 		handler.appendJavaScript(new StringBuilder("Activities.add(").append(aobj.toString()).append(");"));
 	}
 
-	public void remove(String uid, IPartialPageRequestHandler handler) {
-		activities.remove(uid);
-		handler.appendJavaScript(String.format("Activities.remove('%s');", uid));
+	public void remove(IPartialPageRequestHandler handler, String...ids) {
+		if (ids.length < 1) {
+			return;
+		}
+		JSONArray arr = new JSONArray();
+		for (String id : ids) {
+			arr.put(id);
+			activities.remove(id);
+		}
+		handler.appendJavaScript(String.format("Activities.remove(%s);", arr));
 	}
 
 	@Override
@@ -254,7 +276,7 @@ public class ActivitiesPanel extends Panel {
 			case reqRightRemote:
 			case reqRightA:
 			case reqRightAv:
-			case reqRightExclusive:
+			case reqRightMuteOthers:
 			case haveQuestion:
 				cls.append("ui-state-highlight");
 				break;

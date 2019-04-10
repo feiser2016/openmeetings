@@ -42,6 +42,7 @@ import org.apache.openmeetings.db.entity.basic.Client;
 import org.apache.openmeetings.db.entity.basic.IWsClient;
 import org.apache.openmeetings.db.entity.room.Room;
 import org.apache.openmeetings.db.entity.user.PrivateMessage;
+import org.apache.openmeetings.db.entity.user.User;
 import org.apache.openmeetings.db.entity.user.User.Right;
 import org.apache.openmeetings.web.app.Application;
 import org.apache.openmeetings.web.app.ClientManager;
@@ -61,6 +62,7 @@ import org.apache.openmeetings.web.util.ExtendedClientProperties;
 import org.apache.openmeetings.web.util.OmUrlFragment;
 import org.apache.openmeetings.web.util.OmUrlFragment.MenuActions;
 import org.apache.openmeetings.web.util.OmUrlFragment.MenuParams;
+import org.apache.openmeetings.web.util.ProfileImageResourceReference;
 import org.apache.wicket.Component;
 import org.apache.wicket.MarkupContainer;
 import org.apache.wicket.ajax.AbstractDefaultAjaxBehavior;
@@ -122,6 +124,10 @@ public class MainPanel extends Panel {
 		setAuto(true);
 		setOutputMarkupId(true);
 		setOutputMarkupPlaceholderTag(true);
+	}
+
+	@Override
+	protected void onInitialize() {
 		add(new OmWebSocketPanel("ws-panel") {
 			private static final long serialVersionUID = 1L;
 
@@ -140,7 +146,12 @@ public class MainPanel extends Panel {
 			@Override
 			protected void onConnect(ConnectedMessage msg) {
 				ExtendedClientProperties cp = WebSession.get().getExtendedProperties();
-				final Client client = new Client(getSession().getId(), msg.getKey().hashCode(), getUserId(), userDao);
+				final User u = userDao.get(getUserId());
+				final Client client = new Client(
+						getSession().getId()
+						, msg.getKey().hashCode()
+						, u
+						, ProfileImageResourceReference.getUrl(getRequestCycle(), u));
 				uid = client.getUid();
 				cm.add(cp.update(client));
 				log.debug("WebSocketBehavior::onConnect [uid: {}, session: {}, key: {}]", client.getUid(), msg.getSessionId(), msg.getKey());
@@ -175,10 +186,6 @@ public class MainPanel extends Panel {
 				return getClient();
 			}
 		});
-	}
-
-	@Override
-	protected void onInitialize() {
 		menu = new MenuPanel("menu", getMainMenu());
 		add(topControls.setOutputMarkupPlaceholderTag(true).setMarkupId("topControls"));
 		add(contents.add(getClient() == null || panel == null ? EMPTY : panel).setOutputMarkupId(true).setMarkupId("contents"));
@@ -424,6 +431,10 @@ public class MainPanel extends Panel {
 
 	public ChatPanel getChat() {
 		return chat;
+	}
+
+	public MessageDialog getMessageDialog() {
+		return newMessage;
 	}
 
 	public String getUid() {

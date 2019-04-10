@@ -1,5 +1,5 @@
 /* Licensed under the Apache License, Version 2.0 (the "License") http://www.apache.org/licenses/LICENSE-2.0 */
-var Shape = function(wb) {
+var Shape = function(wb, sBtn) {
 	const shape = ShapeBase(wb);
 	shape.obj = null;
 	shape.isDown = false;
@@ -18,7 +18,9 @@ var Shape = function(wb) {
 	};
 	shape.mouseMove = function(o) {
 		const canvas = this;
-		if (!shape.isDown) return;
+		if (!shape.isDown) {
+			return;
+		}
 		const pointer = canvas.getPointer(o.e);
 		shape.updateShape(pointer);
 		canvas.requestRenderAll();
@@ -44,6 +46,7 @@ var Shape = function(wb) {
 			});
 		});
 		shape.internalActivate();
+		VideoUtil.highlight(sBtn.removeClass('disabled'), 5);
 	};
 	shape.deactivate = function() {
 		wb.eachCanvas(function(canvas) {

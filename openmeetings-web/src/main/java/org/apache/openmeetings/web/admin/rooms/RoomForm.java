@@ -71,6 +71,7 @@ import org.apache.wicket.model.CompoundPropertyModel;
 import org.apache.wicket.model.IModel;
 import org.apache.wicket.model.Model;
 import org.apache.wicket.model.PropertyModel;
+import org.apache.wicket.model.ResourceModel;
 import org.apache.wicket.model.util.CollectionModel;
 import org.apache.wicket.spring.injection.annot.SpringBean;
 import org.apache.wicket.util.string.Strings;
@@ -151,7 +152,7 @@ public class RoomForm extends AdminBaseForm<Room> {
 					}
 				}));
 
-		add(new RoomTypeDropDown("type").setRequired(true).setLabel(Model.of(getString("45"))));
+		add(new RoomTypeDropDown("type").setRequired(true).setLabel(new ResourceModel("45")));
 
 		add(new TextArea<String>("comment"));
 
@@ -199,7 +200,7 @@ public class RoomForm extends AdminBaseForm<Room> {
 				Group g = groupDao.get(id);
 				return new RoomGroup(g, RoomForm.this.getModelObject());
 			}
-		}).setLabel(Model.of(getString("828"))).setRequired(isGroupAdmin));
+		}).setLabel(new ResourceModel("828")).setRequired(isGroupAdmin));
 
 		add(new CheckBox("isDemoRoom"));
 		TextField<Integer> demoTime = new TextField<>("demoTime");
@@ -260,7 +261,7 @@ public class RoomForm extends AdminBaseForm<Room> {
 			@Override
 			public String getDisplayValue(User choice) {
 				Address a = choice.getAddress();
-				return String.format("\"%s %s\" <%s>", choice.getFirstname(), choice.getLastname(), a == null ? "" : a.getEmail());
+				return String.format("\"%s\" <%s>", choice.getDisplayName(), a == null ? "" : a.getEmail());
 			}
 		});
 		moderatorChoice.getSettings().setCloseOnSelect(true);
@@ -299,12 +300,12 @@ public class RoomForm extends AdminBaseForm<Room> {
 			@Override
 			protected void populateItem(final ListItem<RoomModerator> item) {
 				RoomModerator moderator = item.getModelObject();
-				Label name = new Label("uName", moderator.getUser().getFirstname() + " " + moderator.getUser().getLastname());
+				Label name = new Label("uName", moderator.getUser().getDisplayName());
 				if (moderator.getId() == null) {
 					name.add(AttributeModifier.append(ATTR_CLASS, "newItem"));
 				}
 				item.add(new CheckBox("superModerator", new PropertyModel<Boolean>(moderator, "superModerator")))
-					.add(new Label("userId", "" + moderator.getUser().getId()))
+					.add(new Label("userId", String.valueOf(moderator.getUser().getId())))
 					.add(name)
 					.add(new Label("email", moderator.getUser().getAddress().getEmail()))
 					.add(new ConfirmableAjaxBorder("delete", getString("80"), getString("833")) {
@@ -346,7 +347,7 @@ public class RoomForm extends AdminBaseForm<Room> {
 				public Collection<BaseFileItem> toChoices(Collection<String> ids) {
 					return fileDao.get(ids);
 				}
-			}).setLabel(Model.of(getString("245"))))
+			}).setLabel(new ResourceModel("245")))
 			.add(new TextField<Long>("wbidx", wbIdx) {
 				private static final long serialVersionUID = 1L;
 
@@ -485,7 +486,6 @@ public class RoomForm extends AdminBaseForm<Room> {
 		target.add(roomList);
 		target.add(pin.setEnabled(getModelObject().isSipEnabled()));
 		updateClients(target);
-		reinitJs(target);
 	}
 
 	@Override

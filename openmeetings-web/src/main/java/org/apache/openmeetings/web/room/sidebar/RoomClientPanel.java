@@ -23,12 +23,10 @@ import static org.apache.openmeetings.util.OpenmeetingsVariables.ATTR_TITLE;
 import static org.apache.openmeetings.web.app.WebSession.getUserId;
 import static org.apache.openmeetings.web.pages.BasePage.ALIGN_LEFT;
 import static org.apache.openmeetings.web.pages.BasePage.ALIGN_RIGHT;
-import static org.apache.openmeetings.web.util.ProfileImageResourceReference.getUrl;
 
 import org.apache.openmeetings.db.entity.basic.Client;
 import org.apache.openmeetings.db.entity.room.Room.Right;
 import org.apache.openmeetings.db.entity.room.Room.RoomElement;
-import org.apache.openmeetings.db.entity.user.User;
 import org.apache.openmeetings.web.pages.BasePage;
 import org.apache.openmeetings.web.room.RoomPanel;
 import org.apache.openmeetings.web.room.sidebar.icon.KickIcon;
@@ -39,8 +37,6 @@ import org.apache.wicket.markup.html.WebMarkupContainer;
 import org.apache.wicket.markup.html.basic.Label;
 import org.apache.wicket.markup.html.list.ListItem;
 import org.apache.wicket.markup.html.panel.Panel;
-import org.apache.wicket.request.cycle.RequestCycle;
-import org.apache.wicket.util.string.Strings;
 
 public class RoomClientPanel extends Panel {
 	private static final long serialVersionUID = 1L;
@@ -51,10 +47,10 @@ public class RoomClientPanel extends Panel {
 		Client c = item.getModelObject();
 		final String uid = c.getUid();
 		item.setMarkupId(String.format("user%s", c.getUid()));
-		item.add(AttributeModifier.append("style", String.format("background-image: url(%s);", getUrl(RequestCycle.get(), c.getUser()))));
+		item.add(AttributeModifier.append("style", String.format("background-image: url(%s);", c.getPictureUri())));
 		item.add(AttributeModifier.append("data-userid", c.getUserId()));
 		add(new RefreshIcon("refresh", uid));
-		final String name = getName(c);
+		final String name = c.getUser().getDisplayName();
 		add(new Label("name", name));
 		add(new UserSpeaksIcon("user-speaks", uid));
 		item.add(AttributeModifier.replace(ATTR_TITLE, name));
@@ -69,27 +65,6 @@ public class RoomClientPanel extends Panel {
 			actions.add(new ClientIconsPanel("icons", uid));
 		}
 		add(actions);
-	}
-
-	private static String getName(Client c) {
-		String delim = "";
-		StringBuilder sb = new StringBuilder();
-		User u = c.getUser();
-		if (!Strings.isEmpty(u.getFirstname())) {
-			sb.append(u.getFirstname());
-			delim = " ";
-		}
-		if (!Strings.isEmpty(u.getLastname())) {
-			sb.append(delim).append(u.getLastname());
-			delim = " ";
-		}
-		if (Strings.isEmpty(sb) && u.getAddress() != null && !Strings.isEmpty(u.getAddress().getEmail())) {
-			sb.append(delim).append(u.getAddress().getEmail());
-		}
-		if (Strings.isEmpty(sb)) {
-			sb.append("N/A");
-		}
-		return sb.toString();
 	}
 
 	@Override

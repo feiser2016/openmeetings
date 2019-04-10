@@ -43,6 +43,7 @@ var Room = (function() {
 		if (typeof(Activities) !== 'undefined') {
 			Activities.init();
 		}
+		Sharer.init(options.chromeExtUrl);
 	}
 	function _getSelfAudioClient() {
 		const vw = $('#video' + Room.getOptions().uid);
@@ -54,17 +55,28 @@ var Room = (function() {
 		}
 		return null;
 	}
+	function _preventKeydown(e) {
+		const base = $(e.target);
+		if (e.target.isContentEditable === true || base.is('textarea, input:not([readonly]):not([type=radio]):not([type=checkbox])')) {
+			return;
+		}
+		if (e.which === 8) { // backspace
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			return false;
+		}
+	}
 	function _keyHandler(e) {
 		if (e.shiftKey) {
 			switch (e.which) {
 				case options.keycode.arrange: // Shift+F8 by default
 					VideoUtil.arrange();
 					break;
-				case options.keycode.exclusive: // Shift+F12 by default
+				case options.keycode.muteothers: // Shift+F12 by default
 				{
 					const v = _getSelfAudioClient();
 					if (v !== null) {
-						VideoManager.clickExclusive(Room.getOptions().uid);
+						VideoManager.clickMuteOthers(Room.getOptions().uid);
 					}
 				}
 					break;
@@ -76,6 +88,8 @@ var Room = (function() {
 					}
 				}
 					break;
+				default:
+					// no-op
 			}
 		}
 		if (e.which === 27) {
@@ -161,15 +175,16 @@ var Room = (function() {
 			});
 			_sbAddResizable();
 		}
-		$(window).on('resize.openmeetings', function() {
-			_setSize();
-		});
+		$('body').addClass('no-header');
+		$(window).on('resize.openmeetings', _setSize);
 		Wicket.Event.subscribe("/websocket/closed", _close);
 		Wicket.Event.subscribe("/websocket/error", _close);
-		$(window).keyup(_keyHandler);
+		$(window).on('keydown.openmeetings', _preventKeydown);
+		$(window).on('keyup.openmeetings', _keyHandler);
 		$(document).click(_mouseHandler);
 	}
 	function _unload() {
+		$('body').removeClass('no-header');
 		$(window).off('resize.openmeetings');
 		Wicket.Event.unsubscribe("/websocket/closed", _close);
 		Wicket.Event.unsubscribe("/websocket/error", _close);
@@ -183,10 +198,16 @@ var Room = (function() {
 		if (typeof(VideoManager) === 'object') {
 			VideoManager.destroy();
 		}
+		const _qconf = $('#quick-confirmation');
+		if (_qconf.dialog('instance')) {
+			_qconf.dialog('destroy');
+		}
 		$('.ui-dialog.user-video').remove();
-		$(window).off('keyup', _keyHandler);
+		$(window).off('keyup.openmeetings');
+		$(window).off('keydown.openmeetings');
 		$(document).off('click', _mouseHandler);
 		sb = undefined;
+		Sharer.close();
 	}
 	function _showClipboard(txt) {
 		const dlg = $('#clipboard-dialog');
@@ -206,13 +227,43 @@ var Room = (function() {
 			]
 		});
 	}
+	function _hasRight(_rights) {
+		const rights = Array.isArray(_rights) ? _rights : [];
+		for (let i = 0; i < rights.length; ++i) {
+			if (options.rights.includes(rights[i])) {
+				return true;
+			}
+		}
+		return false;
+	}
 	function _setQuickPollRights() {
 		const close = $('#quick-vote .close');
 		if (close.length === 1) {
 			close.off();
-			if (options.rights.includes('superModerator') || options.rights.includes('moderator') || options.rights.includes('presenter')) {
+			if (_hasRight(['superModerator', 'moderator', 'presenter'])) {
 				close.show().click(function() {
-					quickPollAction('close');
+					const _qconf = $('#quick-confirmation');
+					_qconf.dialog({
+						resizable: false
+						, height: "auto"
+						, width: 400
+						, modal: true
+						, buttons: [
+							{
+								text: _qconf.data('btn-ok')
+								, click: function() {
+									quickPollAction('close');
+									$(this).dialog('close');
+								}
+							}
+							, {
+								text: _qconf.data('btn-cancel')
+								, click: function() {
+									$(this).dialog('close');
+								}
+							}
+						]
+					});
 				});
 			} else {
 				close.hide();
@@ -228,7 +279,7 @@ var Room = (function() {
 				wbArea.append(qv);
 			}
 			const pro = qv.find('.control.pro')
-				con = qv.find('.control.con');
+				, con = qv.find('.control.con');
 			if (obj.voted) {
 				pro.removeClass('clickable').off();
 				con.removeClass('clickable').off();
@@ -267,6 +318,7 @@ var Room = (function() {
 	self.unload = _unload;
 	self.showClipboard = _showClipboard;
 	self.quickPoll = _quickPoll;
+	self.hasRight = _hasRight;
 	return self;
 })();
 function startPrivateChat(el) {

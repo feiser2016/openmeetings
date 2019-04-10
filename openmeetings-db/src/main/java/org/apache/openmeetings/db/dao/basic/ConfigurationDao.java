@@ -19,24 +19,27 @@
 package org.apache.openmeetings.db.dao.basic;
 
 import static org.apache.commons.lang3.math.NumberUtils.toInt;
+import static org.apache.openmeetings.db.util.DaoHelper.setLimits;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_APPLICATION_BASE_URL;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_APPLICATION_NAME;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_CAM_FPS;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_CHAT_SEND_ON_ENTER;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_CHROME_EXT_URL;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_CRYPT;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_CSP_XFRAME;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DEFAULT_GROUP_ID;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DEFAULT_LANG;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DEFAULT_TIMEZONE;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DISPLAY_NAME_EDITABLE;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_EMAIL_AT_REGISTER;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_EMAIL_VERIFICATION;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_EXT_PROCESS_TTL;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_FNAME_MIN_LENGTH;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_GOOGLE_ANALYTICS_CODE;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_HEADER_CSP;
-import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_HEADER_XFRAME;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_KEYCODE_ARRANGE;
-import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_KEYCODE_EXCLUSIVE;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_KEYCODE_MUTE;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_KEYCODE_MUTE_OTHERS;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_LNAME_MIN_LENGTH;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_LOGIN_MIN_LENGTH;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_MAX_UPLOAD_SIZE;
@@ -55,12 +58,14 @@ import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_SIP_ENAB
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_SIP_EXTEN_CONTEXT;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.DEFAULT_APP_NAME;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.DEFAULT_BASE_URL;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.DEFAULT_CHROME_EXT_URL;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.DEFAULT_MAX_UPLOAD_SIZE;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.DEFAULT_SIP_CONTEXT;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.HEADER_CSP_SELF;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.HEADER_XFRAME_SELF;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.USER_LOGIN_MINIMUM_LENGTH;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.USER_PASSWORD_MINIMUM_LENGTH;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.getRoomSettings;
-import static org.apache.openmeetings.util.OpenmeetingsVariables.getWicketApplicationName;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setAllowRegisterFrontend;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setAllowRegisterOauth;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setAllowRegisterSoap;
@@ -69,9 +74,12 @@ import static org.apache.openmeetings.util.OpenmeetingsVariables.setAudioBitrate
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setAudioRate;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setBaseUrl;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setChatSenndOnEnter;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.setChromeExtensionUrl;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.setContentSecurityPolicy;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setCryptClassName;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setDefaultGroup;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setDefaultLang;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.setDisplayNameEditable;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setExtProcessTtl;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setGaCode;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setMaxUploadSize;
@@ -86,6 +94,7 @@ import static org.apache.openmeetings.util.OpenmeetingsVariables.setSendVerifica
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setSipContext;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setSipEnabled;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.setVideoPreset;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.setxFrameOptions;
 
 import java.net.UnknownHostException;
 import java.util.ArrayList;
@@ -103,14 +112,12 @@ import org.apache.openjpa.event.RemoteCommitProvider;
 import org.apache.openjpa.event.TCPRemoteCommitProvider;
 import org.apache.openjpa.persistence.OpenJPAEntityManagerSPI;
 import org.apache.openjpa.persistence.OpenJPAPersistence;
-import org.apache.openmeetings.IApplication;
 import org.apache.openmeetings.db.dao.IDataProviderDao;
 import org.apache.openmeetings.db.dao.user.UserDao;
 import org.apache.openmeetings.db.entity.basic.Configuration;
-import org.apache.openmeetings.util.DaoHelper;
+import org.apache.openmeetings.db.util.DaoHelper;
 import org.apache.openmeetings.util.OpenmeetingsVariables;
 import org.apache.openmeetings.util.crypt.CryptProvider;
-import org.apache.wicket.Application;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -241,11 +248,6 @@ public class ConfigurationDao implements IDataProviderDao<Configuration> {
 	}
 
 	@Override
-	public Configuration get(long id) {
-		return get(Long.valueOf(id));
-	}
-
-	@Override
 	public Configuration get(Long id) {
 		if (id == null) {
 			return null;
@@ -255,17 +257,15 @@ public class ConfigurationDao implements IDataProviderDao<Configuration> {
 	}
 
 	@Override
-	public List<Configuration> get(int start, int count) {
-		return em.createNamedQuery("getNondeletedConfiguration", Configuration.class)
-				.setFirstResult(start).setMaxResults(count).getResultList();
+	public List<Configuration> get(long start, long count) {
+		return setLimits(em.createNamedQuery("getNondeletedConfiguration", Configuration.class)
+				, start, count).getResultList();
 	}
 
 	@Override
-	public List<Configuration> get(String search, int start, int count, String sort) {
-		TypedQuery<Configuration> q = em.createQuery(DaoHelper.getSearchQuery("Configuration", "c", search, true, false, sort, searchFields), Configuration.class);
-		q.setFirstResult(start);
-		q.setMaxResults(count);
-		return q.getResultList();
+	public List<Configuration> get(String search, long start, long count, String sort) {
+		return setLimits(em.createQuery(DaoHelper.getSearchQuery("Configuration", "c", search, true, false, sort, searchFields), Configuration.class)
+				, start, count).getResultList();
 	}
 
 	@Override
@@ -303,7 +303,7 @@ public class ConfigurationDao implements IDataProviderDao<Configuration> {
 			case CONFIG_MIC_NOISE:
 			case CONFIG_MIC_RATE:
 			case CONFIG_KEYCODE_ARRANGE:
-			case CONFIG_KEYCODE_EXCLUSIVE:
+			case CONFIG_KEYCODE_MUTE_OTHERS:
 			case CONFIG_KEYCODE_MUTE:
 				reloadRoomSettings();
 				break;
@@ -325,21 +325,11 @@ public class ConfigurationDao implements IDataProviderDao<Configuration> {
 			case CONFIG_GOOGLE_ANALYTICS_CODE:
 				reloadGaCode();
 				break;
-			case CONFIG_HEADER_XFRAME:
-			{
-				IApplication iapp = (IApplication)Application.get(getWicketApplicationName());
-				if (iapp != null) {
-					iapp.setXFrameOptions(value);
-				}
-			}
+			case CONFIG_CSP_XFRAME:
+				reloadXFrameOptions();
 				break;
 			case CONFIG_HEADER_CSP:
-			{
-				IApplication iapp = (IApplication)Application.get(getWicketApplicationName());
-				if (iapp != null) {
-					iapp.setContentSecurityPolicy(value);
-				}
-			}
+				reloadContentSecurityPolicy();
 				break;
 			case CONFIG_EXT_PROCESS_TTL:
 				setExtProcessTtl(toInt(value));
@@ -397,6 +387,12 @@ public class ConfigurationDao implements IDataProviderDao<Configuration> {
 				break;
 			case CONFIG_EMAIL_AT_REGISTER:
 				reloadSendRegisterEmail();
+				break;
+			case CONFIG_CHROME_EXT_URL:
+				reloadChromeExtensionUrl();
+				break;
+			case CONFIG_DISPLAY_NAME_EDITABLE:
+				reloadDisplayNameEditable();
 				break;
 		}
 		return entity;
@@ -521,6 +517,22 @@ public class ConfigurationDao implements IDataProviderDao<Configuration> {
 		setSendRegisterEmail(getBool(CONFIG_EMAIL_AT_REGISTER, false));
 	}
 
+	private void reloadChromeExtensionUrl() {
+		setChromeExtensionUrl(getString(CONFIG_CHROME_EXT_URL, DEFAULT_CHROME_EXT_URL));
+	}
+
+	private void reloadXFrameOptions() {
+		setxFrameOptions(getString(CONFIG_CSP_XFRAME, HEADER_XFRAME_SELF));
+	}
+
+	private void reloadContentSecurityPolicy() {
+		setContentSecurityPolicy(getString(CONFIG_HEADER_CSP, HEADER_CSP_SELF));
+	}
+
+	private void reloadDisplayNameEditable() {
+		setDisplayNameEditable(getBool(CONFIG_DISPLAY_NAME_EDITABLE, false));
+	}
+
 	public void reinit() {
 		reloadMaxUpload();
 		reloadCrypt();
@@ -547,6 +559,10 @@ public class ConfigurationDao implements IDataProviderDao<Configuration> {
 		reloadAllowRegisterOauth();
 		reloadSendVerificationEmail();
 		reloadSendRegisterEmail();
+		reloadXFrameOptions();
+		reloadContentSecurityPolicy();
+		reloadChromeExtensionUrl();
+		reloadDisplayNameEditable();
 	}
 
 	private JSONObject reloadRoomSettings() {
@@ -554,7 +570,7 @@ public class ConfigurationDao implements IDataProviderDao<Configuration> {
 			setRoomSettings(new JSONObject()
 					.put("keycode", new JSONObject()
 							.put("arrange", getLong(CONFIG_KEYCODE_ARRANGE, 119L))
-							.put("exclusive", getLong(CONFIG_KEYCODE_EXCLUSIVE, 123L))
+							.put("muteothers", getLong(CONFIG_KEYCODE_MUTE_OTHERS, 123L))
 							.put("mute", getLong(CONFIG_KEYCODE_MUTE, 118L))
 							)
 					.put("camera", new JSONObject().put("fps", getLong(CONFIG_CAM_FPS, 30L)))

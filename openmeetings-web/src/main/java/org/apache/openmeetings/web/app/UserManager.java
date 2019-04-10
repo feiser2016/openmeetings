@@ -33,20 +33,26 @@ import java.io.IOException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Date;
 import java.util.Locale;
+import java.util.Map;
 
 import org.apache.openmeetings.db.dao.label.LabelDao;
 import org.apache.openmeetings.db.dao.user.GroupDao;
 import org.apache.openmeetings.db.dao.user.IUserManager;
 import org.apache.openmeetings.db.dao.user.UserDao;
 import org.apache.openmeetings.db.dto.user.OAuthUser;
+import org.apache.openmeetings.db.entity.basic.Client;
 import org.apache.openmeetings.db.entity.user.GroupUser;
 import org.apache.openmeetings.db.entity.user.User;
 import org.apache.openmeetings.db.entity.user.User.Right;
 import org.apache.openmeetings.db.entity.user.User.Type;
+import org.apache.openmeetings.db.manager.IClientManager;
 import org.apache.openmeetings.service.mail.EmailManager;
 import org.apache.openmeetings.util.OmException;
 import org.apache.openmeetings.util.crypt.CryptProvider;
 import org.apache.openmeetings.util.crypt.ICrypt;
+import org.apache.wicket.IConverterLocator;
+import org.apache.wicket.core.util.lang.PropertyResolver;
+import org.apache.wicket.core.util.lang.PropertyResolverConverter;
 import org.apache.wicket.util.string.Strings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,6 +74,8 @@ public class UserManager implements IUserManager {
 	private UserDao userDao;
 	@Autowired
 	private EmailManager emailManager;
+	@Autowired
+	private IClientManager cm;
 
 	private static boolean sendConfirmation() {
 		String baseURL = getBaseUrl();
@@ -188,59 +196,37 @@ public class UserManager implements IUserManager {
 	 */
 	@Override
 	public boolean kickUsersByRoomId(Long roomId) {
-		/*
 		try {
-			sessionDao.clearSessionByRoomId(roomId);
-
-			for (StreamClient rcl : streamClientManager.list(roomId)) {
-				if (rcl == null) {
-					return true;
-				}
-				String scopeName = rcl.getRoomId() == null ? HIBERNATE : rcl.getRoomId().toString();
-				IScope currentScope = scopeAdapter.getChildScope(scopeName);
-				scopeAdapter.roomLeaveByScope(rcl, currentScope);
-
-				Map<Integer, String> messageObj = new HashMap<>();
-				messageObj.put(0, "kick");
-				scopeAdapter.sendMessageById(messageObj, rcl.getUid(), currentScope);
+			for (Client c : cm.listByRoom(roomId)) {
+				Application.kickUser(c);
 			}
 			return true;
 		} catch (Exception err) {
 			log.error("[kickUsersByRoomId]", err);
 		}
-		*/
 		return false;
 	}
 
 	@Override
-	public boolean kickById(String uid) {
-		/*
+	public boolean kickExternal(Long roomId, String externalType, String externalId) {
+		boolean result = false;
 		try {
-			StreamClient rcl = streamClientManager.get(uid);
-
-			if (rcl == null) {
-				return true;
+			if (roomId == null) {
+				return result;
 			}
-
-			String scopeName = rcl.getScope() == null ? HIBERNATE : rcl.getScope();
-			IScope scope = scopeAdapter.getChildScope(scopeName);
-			if (scope == null) {
-				log.warn("### kickById ### The scope is NULL");
-				return false;
+			User u = userDao.getExternalUser(externalId, externalType);
+			if (u != null) {
+				for (Client c : cm.listByUser(u.getId())) {
+					if (roomId.equals(c.getRoomId())) {
+						Application.kickUser(c);
+						result = true;
+					}
+				}
 			}
-
-			Map<Integer, String> messageObj = new HashMap<>();
-			messageObj.put(0, "kick");
-			scopeAdapter.sendMessageById(messageObj, uid, scope);
-
-			scopeAdapter.roomLeaveByScope(rcl, scope);
-
-			return true;
-		} catch (Exception err) {
-			log.error("[kickById]", err);
+		} catch (Exception e) {
+			log.error("[kickExternal]", e);
 		}
-		*/
-		return false;
+		return result;
 	}
 
 	@Override
@@ -250,11 +236,11 @@ public class UserManager implements IUserManager {
 
 	@Override
 	public User loginOAuth(OAuthUser user, long serverId) throws IOException, NoSuchAlgorithmException {
-		if (!userDao.validLogin(user.getUid())) {
+		if (!userDao.validLogin(user.getLogin())) {
 			log.error("Invalid login, please check parameters");
 			return null;
 		}
-		User u = userDao.getByLogin(user.getUid(), Type.oauth, serverId);
+		User u = userDao.getByLogin(user.getLogin(), Type.oauth, serverId);
 		if (!userDao.checkEmail(user.getEmail(), Type.oauth, serverId, u == null ? null : u.getId())) {
 			log.error("Another user with the same email exists");
 			return null;
@@ -262,33 +248,58 @@ public class UserManager implements IUserManager {
 		// generate random password
 		// check if the user already exists and register new one if it's needed
 		if (u == null) {
-			u = getNewUserInstance(null);
-			u.setType(Type.oauth);
-			u.getRights().remove(Right.Login);
-			u.setDomainId(serverId);
-			u.getGroupUsers().add(new GroupUser(groupDao.get(getDefaultGroup()), u));
-			u.setLogin(user.getUid());
-			u.setShowContactDataToContacts(true);
-			u.setLastname(user.getLastName());
-			u.setFirstname(user.getFirstName());
-			u.getAddress().setEmail(user.getEmail());
-			String picture = user.getPicture();
-			if (picture != null) {
-				u.setPictureUri(picture);
+			final User fUser = getNewUserInstance(null);
+			fUser.setType(Type.oauth);
+			fUser.getRights().remove(Right.Login);
+			fUser.setDomainId(serverId);
+			fUser.getGroupUsers().add(new GroupUser(groupDao.get(getDefaultGroup()), fUser));
+			for (Map.Entry<String, String> entry : user.getUserData().entrySet()) {
+				final String expression = entry.getKey();
+				PropertyResolver.setValue(expression, fUser, entry.getValue(), new LanguageConverter(expression, fUser, null, null));
 			}
-			String locale = user.getLocale();
-			if (locale != null) {
-				Locale loc = Locale.forLanguageTag(locale);
-				if (loc != null) {
-					u.setLanguageId(getLanguage(loc));
-					u.getAddress().setCountry(loc.getCountry());
-				}
-			}
+			fUser.setShowContactDataToContacts(true);
+			u = fUser;
 		}
 		u.setLastlogin(new Date());
 		ICrypt crypt = CryptProvider.get();
 		u = userDao.update(u, crypt.randomPassword(25), Long.valueOf(-1));
 
 		return u;
+	}
+
+	private class LanguageConverter extends PropertyResolverConverter {
+		private static final long serialVersionUID = 1L;
+		final String expression;
+		final User fUser;
+
+		public LanguageConverter(final String expression, final User fUser, IConverterLocator converterSupplier, Locale locale) {
+			super(converterSupplier, locale);
+			this.expression = expression;
+			this.fUser = fUser;
+		}
+
+		@SuppressWarnings("unchecked")
+		@Override
+		public <T> T convert(Object object, Class<T> clz) {
+			if ("languageId".equals(expression) && Long.class.isAssignableFrom(clz)) {
+				Long language = 1L;
+				String locale = (String)object;
+				if (locale != null) {
+					Locale loc = Locale.forLanguageTag(locale);
+					if (loc != null) {
+						language = getLanguage(loc);
+						fUser.setLanguageId(language);
+						fUser.getAddress().setCountry(loc.getCountry());
+					}
+				}
+				return (T)language;
+			}
+			return (T)object;
+		}
+
+		@Override
+		protected <C> String convertToString(C object, Locale locale) {
+			return String.valueOf(object);
+		}
 	}
 }

@@ -20,6 +20,7 @@ html, body {
 	height: 100%;
 	margin: 0;
 	font-family: Arial, Helvetica, sans-serif;
+	overflow-y: hidden;
 }
 * {
 	box-sizing: content-box; /* IE */
@@ -42,8 +43,8 @@ html, body {
 	background-image: url(images/logo.png);
 	background-repeat: no-repeat;
 	padding-left: 80px;
-	margin-bottom: 10px;
 	margin-left: 20px;
+	height: var(--header-height);
 }
 #topLinks {
 	position: absolute;
@@ -77,60 +78,38 @@ html, body {
 .clickable {
 	cursor: pointer;
 }
-.dragbox-content .tableWrapper {
-	width: auto;
-	height: 100px;
-}
-.dragbox-content .tableWrapper .adminListTable {
-	max-width: none;
-	min-width: 0;
-}
 .help.support h3 {
 	margin-bottom: 5px;
 }
-.tableWrapper, .tableWrapperSmall {
-	background-color: #FFFFFF;
-	border: solid 1px #aacfe4;
-	width: 536px;
-	height: 100px;
-	overflow-y: scroll;
+.user-settings.ui-tabs {
+	height: calc(100% - 10px);
 }
-.tableWrapper {
-	height: 500px;
+.user-settings.ui-tabs .ui-tabs-panel {
+	height: calc(100% - 60px);
 }
-
+.user-settings .edit-profile {
+	height: calc(100% - 10px);
+}
+#searchUsersTable.list-table {
+	max-width: 100%;
+	height: calc(100% - 50px);
+}
 .formelementradiobox {
 	margin-left: 100px;
 }
-
 .formelementradiobox input {
 	margin: 0px 0px;
 	border: none;
 	width: 20px;
 }
-
 .formelementradiobox label {
 	width: 260px;
 	margin: 0px
 }
-
-.addLanguagePanel {
-	display: inline-block;
-}
-
-.addLanguagePanel select {
-	padding: 0px 0px;
-	border: solid 1px #aacfe4;
-	width: 140px;
-	font-size: 12px;
-	margin-left: 2px;
-}
-
 .pagedEntityListPanel {
 	margin-left: 2px;
 	display: inline-block;
 }
-
 .searchForm {
 	display: inline-block;
 	vertical-align: top;
@@ -239,8 +218,7 @@ html, body {
 	min-width: 150px;
 }
 #contents {
-}
-#contents .dragbox-content {
+	height: calc(100% - var(--menu-height));
 }
 #feedcontainer {
 	overflow: auto;
@@ -313,6 +291,16 @@ html, body {
 	padding: 15px;
 	-webkit-border-radius: 8px;
 	border-radius: 8px;
+}
+.private.message.body {
+	border: 0;
+	margin: 0;
+	padding: 0;
+}
+.private.message.body .quote {
+	border-left: 1px solid #cccccc;
+	margin-left: 10px;
+	padding-left: 10px;
 }
 .ui-progressbar div {
 	text-align: center;
@@ -430,10 +418,6 @@ select.messages.selector {
 .fht-tbody {
 	background-color: white;
 }
-#searchUsersTable th, .fht-table th {
-	font-weight: bold !important;
-	text-align: left;
-}
 #ui-datepicker-div {
 	z-index: 100 !important;
 }
@@ -442,8 +426,9 @@ select.messages.selector {
 	min-width: 400px;
 }
 .room-list .room-row {
+	border: 1px solid transparent;
 	background-color: rgb(248, 248, 248);
-	border-bottom: 5px solid white;
+	margin-bottom: 4px;
 	padding: 5px;
 	position: relative;
 }
@@ -474,24 +459,71 @@ select.messages.selector {
 .om-select2.full-width .select2.select2-container {
 	width: 100% !important;
 }
-.recording .video {
+.recording-panel {
+	display: flex;
+	height: 100%;
+}
+.recording-panel .file.tree.container {
+	width: 325px;
+	height: 100%;
+}
+.recording-panel .file.tree.container .tree-panel {
+	height: calc(100% - var(--info-height));
+}
+.recording-panel .file.tree.container .info {
+	height: var(--info-height);
+}
+.recording-panel .file.tree.container .tree-panel form
+	, .recording-panel .file.tree.container .tree-panel form .file.tree
+{
+	height: 100%;
+}
+.recording-panel .file.tree.container .tree-panel form .file.tree{
+	height: 100%;
+}
+.recording-panel .video {
 	width: 100%;
 	display: inline-block;
 	box-shadow: 0 0 10px 1px rgba(74, 137, 151, 0.5);
 }
-.recording .video video {
+.recording-panel .video video {
 	width: 100%;
 }
-.page.recording {
+.page.recording-panel {
 	padding-top: 40px;
 }
-.page.recording .video, .page.recording .info {
+.page.recording-panel .video, .page.recording-panel .info {
 	display: inline-block;
 	float: left;
 	padding-left: 20px;
 }
-.page.recording .video {
+.page.recording-panel .video {
 	min-width: 400px;
+}
+.rooms-header {
+	min-height: var(--rooms-header-height);
+	max-height: var(--rooms-header-height);
+	height: var(--rooms-header-height);
+}
+#orgTabs, .rooms-area {
+	height: calc(100% - var(--rooms-header-height) - var(--buffer-height));
+	padding-top: 0;
+	padding-bottom: 0;
+}
+.rooms-area {
+	display: flex;
+}
+#orgTabs.ui-tabs .ui-tabs-panel {
+	display: flex;
+	padding-bottom: 0;
+	height: calc(100% - var(--tabs-height));
+	padding-top: 0;
+}
+.rooms-table {
+	display: inline-block;
+	min-width: 415px;
+	height: 100%;
+	overflow-y: auto;
 }
 .rooms.title {
 	font-weight: bold;
@@ -508,6 +540,9 @@ select.messages.selector {
 }
 .user.info.panel fieldset table, .user.info.panel fieldset table textarea {
 	width: 100%;
+}
+#topControls {
+	height: var(--menu-height);
 }
 #topControls #wicketDebugBar {
 	right: auto; /* IE */
@@ -577,11 +612,139 @@ form .input {
 	width: 75%;
 	vertical-align: middle;
 }
- /**** TODO need to be unified with other icons used ****/
-div.formSaveBar {
-	height: 35px;
+.col-1 {
+	width: 8.3333%;
 }
+.col-2 {
+	width: 16.6666%;
+}
+.col-3 {
+	width: 24.9999%;
+}
+.col-4 {
+	width: 33.3332%;
+}
+.col-5 {
+	width: 41.6665%;
+}
+.col-6 {
+	width: 49.9998%;
+}
+.col-7 {
+	width: 58.3331%;
+}
+.col-8 {
+	width: 66.6664%;
+}
+.col-9 {
+	width: 74.9997%;
+}
+.col-10 {
+	width: 83.333%;
+}
+.col-11 {
+	width: 91.6663%;
+}
+.col-12 {
+	width: 100%;
+}
+.col-wrapper {
+	word-wrap: break-word;
+}
+.list-table {
+	display: flex;
+	flex-flow: column;
+	width: 100%;
+	max-width: 518px;
+	min-width: 518px;
+	height: calc(100% - var(--nav-height) - var(--lbl-nav-height) - var(--buffer-height));
+}
+.list-table thead {
+	/* head takes the height it requires, 
+	and it's not scaled when table is resized */
+	flex: 0 0 auto;
+	width: calc(100% - 1.0em);
+}
+.list-table tbody {
+	/* body takes all the remaining available space */
+	flex: 1 1 auto;
+	display: block;
+	overflow-y: scroll;
+	overflow-x: hidden;
+	background-color: white;
+}
+.list-table tbody tr {
+	width: 100%;
+}
+.list-table thead, .list-table tbody tr {
+	display: table;
+	table-layout: fixed;
+}
+.list-table th {
+	overflow: hidden;
+	text-align: left;
+}
+.bottom-bumper {
+	height: 30px;
+}
+.list-table.small {
+	height: 150px;
+}
+.list-table.full-width {
+	max-width: initial;
+}
+.list-table tr:nth-child(odd), .striped-table .striped-row:nth-child(odd) {
+	opacity: .8;
+}
+.list-table tr.deleted {
+	background-image: repeating-linear-gradient(-45deg, transparent, transparent 5px, /* gap */ #cccccc 6px, /* overall width incluing gap */ #cccccc 6px);
+}
+.list-table tr:hover, .room-row:hover {
+	/*SHOULD BE MANUALLY IN SYNC WITH THEME .ui-state-hover */
+	border: 1px solid #74b2e2;
+	background-color: #e4f1fb;
+	font-weight: normal;
+	color: #0070a3;
+}
+.tableWrapper {
+	background-color: #FFFFFF;
+	border: solid 1px #aacfe4;
+	width: 536px;
+	height: 100px;
+}
+.dashboard {
+	overflow-y: auto;
+	height: 100%;
+}
+.dragbox-content .tableWrapper {
+	/* room users on dashboard */
+	width: auto;
+	height: 100px;
+}
+.dragbox-content .rooms-widget {
+	display: flex;
+}
+.tableWrapper .list-table {
+	height: 100%;
+}
+.dragbox-content .tableWrapper .list-table {
+	min-width: auto;
+}
+.level-meter {
+	border-radius: 3px;
+}
+/**** TODO need to be unified with other icons used ****/
 .hash-panel-main {
 	width: 100%;
 	height: 100%;
+}
+.om-tbl {
+	display: table;
+	width: 100%;
+}
+.om-tbl .om-tbl-row {
+	display: table-row;
+}
+.om-tbl .om-tbl-row .om-tbl-cell {
+	display: table-cell;
 }

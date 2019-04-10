@@ -19,12 +19,14 @@
 package org.apache.openmeetings.web.room.poll;
 
 import static org.apache.openmeetings.core.util.WebSocketHelper.sendRoom;
+import static org.apache.openmeetings.web.app.WebSession.getUserId;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 import org.apache.openmeetings.db.dao.room.PollDao;
+import org.apache.openmeetings.db.dao.user.UserDao;
 import org.apache.openmeetings.db.entity.room.RoomPoll;
 import org.apache.openmeetings.db.entity.room.RoomPollAnswer;
 import org.apache.openmeetings.db.util.ws.RoomMessage;
@@ -75,16 +77,21 @@ public class PollResultsDialog extends AbstractDialog<RoomPoll> {
 	private DialogButton cancel;
 	private DialogButton close;
 	private DialogButton delete;
+	private DialogButton clone;
 	private boolean moderator = false;
 	private MessageDialog closeConfirm;
 	private MessageDialog deleteConfirm;
 	private boolean opened = false;
+	private final CreatePollDialog createPoll;
 	@SpringBean
 	private PollDao pollDao;
+	@SpringBean
+	private UserDao userDao;
 
-	public PollResultsDialog(String id, Long _roomId) {
+	public PollResultsDialog(String id, CreatePollDialog createPoll, Long _roomId) {
 		super(id, "");
 		this.roomId = _roomId;
+		this.createPoll = createPoll;
 		add(selForm = new PollSelectForm("selForm"));
 		add(dispForm = new PollResultsForm("dispForm"));
 	}
@@ -95,6 +102,7 @@ public class PollResultsDialog extends AbstractDialog<RoomPoll> {
 		cancel = new DialogButton("cancel", getString("lbl.cancel"));
 		close = new DialogButton("close", getString("1418"));
 		delete = new DialogButton("delete", getString("1420"));
+		clone = new DialogButton("clone", getString("poll.clone"));
 		add(closeConfirm = new MessageDialog("closeConfirm", getString("1418"), getString("1419"), DialogButtons.YES_NO, DialogIcon.WARN) {
 			private static final long serialVersionUID = 1L;
 
@@ -135,7 +143,7 @@ public class PollResultsDialog extends AbstractDialog<RoomPoll> {
 
 	@Override
 	protected List<DialogButton> getButtons() {
-		return Arrays.asList(delete, close, cancel);
+		return Arrays.asList(clone, delete, close, cancel);
 	}
 
 	public void updateModel(IPartialPageRequestHandler target, boolean moderator) {
@@ -193,11 +201,24 @@ public class PollResultsDialog extends AbstractDialog<RoomPoll> {
 	public void onClick(AjaxRequestTarget target, DialogButton button) {
 		if (close.equals(button)) {
 			closeConfirm.open(target);
+			return;
 		} else if (delete.equals(button)) {
 			deleteConfirm.open(target);
-		} else {
-			super.onClick(target, button);
+			return;
+		} else if (moderator && clone.equals(button)) {
+			RoomPoll rp = dispForm.getModelObject();
+			RoomPoll nrp = new RoomPoll();
+			nrp.setCreator(userDao.get(getUserId()));
+			nrp.setName(rp.getName());
+			nrp.setQuestion(rp.getQuestion());
+			nrp.setType(rp.getType());
+			nrp.setRoom(rp.getRoom());
+			createPoll.setModelObject(nrp);
+			createPoll.getForm().setModelObject(nrp);
+			target.add(createPoll.getForm());
+			createPoll.open(target);
 		}
+		super.onClick(target, button);
 	}
 
 	@Override
@@ -349,6 +370,7 @@ public class PollResultsDialog extends AbstractDialog<RoomPoll> {
 			count.setDefaultModelObject(poll == null ? 0 : poll.getAnswers().size());
 			handler.add(this);
 			close.setVisible(moderator && (poll != null && !poll.isArchived()), handler);
+			clone.setVisible(moderator && (poll != null && poll.isArchived()), handler);
 			delete.setVisible(moderator, handler);
 			if (redraw) {
 				redraw(handler);

@@ -19,13 +19,19 @@
 package org.apache.openmeetings.installation;
 
 import static org.apache.openmeetings.db.dao.user.UserDao.getNewUserInstance;
+import static org.apache.openmeetings.db.dto.user.OAuthUser.PARAM_EMAIL;
+import static org.apache.openmeetings.db.dto.user.OAuthUser.PARAM_FNAME;
+import static org.apache.openmeetings.db.dto.user.OAuthUser.PARAM_LNAME;
+import static org.apache.openmeetings.db.dto.user.OAuthUser.PARAM_LOGIN;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_APPLICATION_BASE_URL;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_APPLICATION_NAME;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_APPOINTMENT_REMINDER_MINUTES;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_CALENDAR_ROOM_CAPACITY;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_CAM_FPS;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_CHAT_SEND_ON_ENTER;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_CHROME_EXT_URL;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_CRYPT;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_CSP_XFRAME;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DASHBOARD_RSS_FEED1;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DASHBOARD_RSS_FEED2;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DASHBOARD_SHOW_CHAT;
@@ -36,6 +42,7 @@ import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DEFAULT_
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DEFAULT_LANG;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DEFAULT_LDAP_ID;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DEFAULT_TIMEZONE;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DISPLAY_NAME_EDITABLE;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DOCUMENT_DPI;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DOCUMENT_QUALITY;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_EMAIL_AT_REGISTER;
@@ -44,11 +51,10 @@ import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_EXT_PROC
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_FNAME_MIN_LENGTH;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_GOOGLE_ANALYTICS_CODE;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_HEADER_CSP;
-import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_HEADER_XFRAME;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_IGNORE_BAD_SSL;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_KEYCODE_ARRANGE;
-import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_KEYCODE_EXCLUSIVE;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_KEYCODE_MUTE;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_KEYCODE_MUTE_OTHERS;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_LNAME_MIN_LENGTH;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_LOGIN_MIN_LENGTH;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_MAX_UPLOAD_SIZE;
@@ -87,9 +93,11 @@ import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_SMTP_TIM
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_SMTP_TLS;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_SMTP_USER;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.DEFAULT_APP_NAME;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.DEFAULT_CHROME_EXT_URL;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.DEFAULT_MAX_UPLOAD_SIZE;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.DEFAULT_MINUTES_REMINDER_SEND;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.HEADER_CSP_SELF;
-import static org.apache.openmeetings.util.OpenmeetingsVariables.HEADER_XFRAME_SAMEORIGIN;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.HEADER_XFRAME_SELF;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.USER_LOGIN_MINIMUM_LENGTH;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.USER_PASSWORD_MINIMUM_LENGTH;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.getAudioBitrate;
@@ -115,7 +123,8 @@ import org.apache.openmeetings.db.entity.room.Room.RoomElement;
 import org.apache.openmeetings.db.entity.room.Room.Type;
 import org.apache.openmeetings.db.entity.room.RoomGroup;
 import org.apache.openmeetings.db.entity.server.OAuthServer;
-import org.apache.openmeetings.db.entity.server.OAuthServer.RequestMethod;
+import org.apache.openmeetings.db.entity.server.OAuthServer.RequestInfoMethod;
+import org.apache.openmeetings.db.entity.server.OAuthServer.RequestTokenMethod;
 import org.apache.openmeetings.db.entity.user.Group;
 import org.apache.openmeetings.db.entity.user.GroupUser;
 import org.apache.openmeetings.db.entity.user.User;
@@ -186,7 +195,7 @@ public class ImportInitvalues {
 						+ "Be carefull what you do here! If you change it while "
 						+ "running previous Pass of users will not be workign anymore! "
 						+ "for more Information see https://openmeetings.apache.org/CustomCryptMechanism.html"
-				, VER_1_9);
+						, VER_1_9);
 
 		addCfg(list, CONFIG_REGISTER_FRONTEND, String.valueOf(cfg.isAllowFrontendRegister()), Configuration.Type.bool
 				, "Is user register available on login screen", VER_1_8);
@@ -241,9 +250,9 @@ public class ImportInitvalues {
 
 		addCfg(list, CONFIG_EMAIL_VERIFICATION, String.valueOf(cfg.isSendEmailWithVerficationCode()), Configuration.Type.bool,
 				String.format("User must activate their account by clicking on the "
-					+ "activation-link in the registering Email "
-					+ "It makes no sense to make this(%s) 'true' while "
-					+ "%s is 'false' cause you need to send a EMail.", CONFIG_EMAIL_VERIFICATION, CONFIG_EMAIL_AT_REGISTER), VER_2_0);
+						+ "activation-link in the registering Email "
+						+ "It makes no sense to make this(%s) 'true' while "
+						+ "%s is 'false' cause you need to send a EMail.", CONFIG_EMAIL_VERIFICATION, CONFIG_EMAIL_AT_REGISTER), VER_2_0);
 
 		addCfg(list, CONFIG_APPLICATION_BASE_URL, cfg.getBaseUrl(), Configuration.Type.string, "Base URL your OPenmeetings installation will be accessible at.", "3.0.2");
 
@@ -285,7 +294,7 @@ public class ImportInitvalues {
 		addCfg(list, CONFIG_MAX_UPLOAD_SIZE, String.valueOf(DEFAULT_MAX_UPLOAD_SIZE), Configuration.Type.number,
 				"Maximum size of upload file (bytes)", VER_1_8);
 
-		addCfg(list, CONFIG_APPOINTMENT_REMINDER_MINUTES, "15", Configuration.Type.number,
+		addCfg(list, CONFIG_APPOINTMENT_REMINDER_MINUTES, String.valueOf(DEFAULT_MINUTES_REMINDER_SEND), Configuration.Type.number,
 				"The number of minutes before reminder emails are send. Set to 0 to disable reminder emails", VER_1_9);
 
 		addCfg(list, CONFIG_LOGIN_MIN_LENGTH, String.valueOf(USER_LOGIN_MINIMUM_LENGTH), Configuration.Type.number,
@@ -299,8 +308,8 @@ public class ImportInitvalues {
 
 		addCfg(list, CONFIG_KEYCODE_ARRANGE, "119", Configuration.Type.number
 				, "A hot key code for arrange video windows functionality. Should be used with Shift key. (Keycode 119 is F8)", VER_2_0);
-		addCfg(list, CONFIG_KEYCODE_EXCLUSIVE, "123", Configuration.Type.number
-				, "A hot key code for the 'give exclusive audio' functionality. Should be used with Shift key. (Keycode 123 is F12)", VER_2_0);
+		addCfg(list, CONFIG_KEYCODE_MUTE_OTHERS, "123", Configuration.Type.number
+				, "A hot key code for the 'mute others' functionality. Should be used with Shift key. (Keycode 123 is F12)", VER_2_0);
 		addCfg(list, CONFIG_KEYCODE_MUTE, "118", Configuration.Type.number
 				, "A hot key code for the 'mute/unmute audio' functionality. Should be used with Shift key. (Keycode 118 is F7)", VER_2_0);
 
@@ -313,8 +322,8 @@ public class ImportInitvalues {
 
 		addCfg(list, CONFIG_DEFAULT_LANDING_ZONE, "user/dashboard", Configuration.Type.string
 				, "Area to be shown to the user after login. Possible values are: "
-					+ "user/dashboard, user/calendar, user/record, rooms/my, rooms/group, rooms/public, admin/user, admin/connection"
-					+ ", admin/group, admin/room, admin/config, admin/lang, admin/ldap, admin/backup, admin/server, admin/oauth2", "2.1.x");
+						+ "user/dashboard, user/calendar, user/record, rooms/my, rooms/group, rooms/public, admin/user, admin/connection"
+						+ ", admin/group, admin/room, admin/config, admin/lang, admin/ldap, admin/backup, admin/server, admin/oauth2", "2.1.x");
 
 		// oauth2 params
 		addCfg(list, CONFIG_IGNORE_BAD_SSL, String.valueOf(false), Configuration.Type.bool,
@@ -323,7 +332,6 @@ public class ImportInitvalues {
 		addCfg(list, CONFIG_REDIRECT_URL_FOR_EXTERNAL, "", Configuration.Type.string,
 				"Users entered the room via invitationHash or secureHash will be redirected to this URL on connection lost", VER_3_0);
 		addCfg(list, CONFIG_GOOGLE_ANALYTICS_CODE, null, Configuration.Type.string, "Code for Google Analytics", "3.1.0");
-		addCfg(list, CONFIG_HEADER_XFRAME, HEADER_XFRAME_SAMEORIGIN, Configuration.Type.string, "Value for 'X-Frame-Options' header (default: DENY), more info: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Frame-Options", VER_3_3_0);
 		addCfg(list, CONFIG_HEADER_CSP, HEADER_CSP_SELF, Configuration.Type.string, String.format("Value for 'Content-Security-Policy' header (default: %s), have to be modified to enable Google analytics site: https://content-security-policy.com/", HEADER_CSP_SELF), VER_3_3_0);
 		addCfg(list, CONFIG_EXT_PROCESS_TTL, String.valueOf(getExtProcessTtl()), Configuration.Type.number, String.format("Time to live in minutes for external processes such as conversion via ffmpeg (default %s minutes)", getExtProcessTtl()), VER_3_3_0);
 		addCfg(list, CONFIG_MYROOMS_ENABLED, String.valueOf(true), Configuration.Type.bool, "Users are allowed to create personal rooms", "3.3.2");
@@ -339,11 +347,14 @@ public class ImportInitvalues {
 				"Controls if chat message will be set on Enter (default: send on Ctrl+Enter)", "4.0.5");
 		addCfg(list, CONFIG_MP4_VIDEO_PRESET, "medium", Configuration.Type.bool,
 				"Preset (encoder optimization settings) to be used while performing mp4 conversion."
-				+ "Valid values are: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow", "4.0.5");
+					+ "Valid values are: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow", "4.0.5");
 		addCfg(list, CONFIG_CAM_FPS, "30", Configuration.Type.number, "Camera FPS, should be positive number in range (0, 60]", VER_5_0_0);
 		addCfg(list, CONFIG_MIC_RATE, "22", Configuration.Type.number, "The rate at which the microphone should capture sound, in kHz. The default value is 22 kHz.", VER_5_0_0);
 		addCfg(list, CONFIG_MIC_ECHO, String.valueOf(true), Configuration.Type.bool, "Whether or not echo cancellation is preferred and/or required.", VER_5_0_0);
 		addCfg(list, CONFIG_MIC_NOISE, String.valueOf(true), Configuration.Type.bool, "Whether noise suppression is preferred and/or required.", VER_5_0_0);
+		addCfg(list, CONFIG_CSP_XFRAME, HEADER_XFRAME_SELF, Configuration.Type.string, String.format("Value for 'frame-src' directive of 'Content-Security-Policy' header (default: %s), more info: https://w3c.github.io/webappsec-csp/", HEADER_XFRAME_SELF), VER_5_0_0);
+		addCfg(list, CONFIG_CHROME_EXT_URL, DEFAULT_CHROME_EXT_URL, Configuration.Type.string, String.format("URL to custom page with Chrome Extension logic (default %s).", DEFAULT_CHROME_EXT_URL), VER_5_0_0);
+		addCfg(list, CONFIG_DISPLAY_NAME_EDITABLE, String.valueOf(false), Configuration.Type.bool, "Is user will be able to edit his/her display name (default false).", "4.0.7");
 		return list;
 	}
 	public void loadConfiguration(InstallationConfig cfg) {
@@ -457,77 +468,76 @@ public class ImportInitvalues {
 
 	public void loadInitialOAuthServers() {
 		// Yandex
-		OAuthServer yaServer = new OAuthServer();
-		yaServer.setName("Yandex");
-		yaServer.setIconUrl("https://yandex.st/morda-logo/i/favicon.ico");
-		yaServer.setClientId(CLIENT_PLACEHOLDER);
-		yaServer.setClientSecret(SECRET_PLACEHOLDER);
-		yaServer.setEnabled(false);
-		yaServer.setRequestInfoUrl("https://login.yandex.ru/info?format=json&oauth_token={$access_token}");
-		yaServer.setRequestTokenUrl("https://oauth.yandex.ru/token");
-		yaServer.setRequestKeyUrl("https://oauth.yandex.ru/authorize?response_type=code&client_id={$client_id}");
-		yaServer.setRequestTokenAttributes("grant_type=authorization_code&code={$code}&client_id={$client_id}&client_secret={$client_secret}");
-		yaServer.setRequestTokenMethod(RequestMethod.POST);
-		yaServer.setLoginParamName("login");
-		yaServer.setEmailParamName("default_email");
-		yaServer.setFirstnameParamName(FNAME_PARAM);
-		yaServer.setLastnameParamName(LNAME_PARAM);
-		oauthDao.update(yaServer, null);
+		oauthDao.update(new OAuthServer()
+				.setName("Yandex")
+				.setIconUrl("https://yandex.st/morda-logo/i/favicon.ico")
+				.setEnabled(false)
+				.setClientId(CLIENT_PLACEHOLDER)
+				.setClientSecret(SECRET_PLACEHOLDER)
+				.setRequestKeyUrl("https://oauth.yandex.ru/authorize?response_type=code&client_id={$client_id}")
+				.setRequestTokenUrl("https://oauth.yandex.ru/token")
+				.setRequestTokenMethod(RequestTokenMethod.POST)
+				.setRequestTokenAttributes("grant_type=authorization_code&code={$code}&client_id={$client_id}&client_secret={$client_secret}")
+				.setRequestInfoUrl("https://login.yandex.ru/info?format=json&oauth_token={$access_token}")
+				.addMapping(PARAM_LOGIN, "login")
+				.addMapping(PARAM_EMAIL, "default_email")
+				.addMapping(PARAM_FNAME, FNAME_PARAM)
+				.addMapping(PARAM_LNAME, LNAME_PARAM), null);
 
 		// Google
-		OAuthServer googleServer = new OAuthServer();
-		googleServer.setName("Google");
-		googleServer.setIconUrl("https://www.google.com/images/google_favicon_128.png");
-		googleServer.setEnabled(false);
-		googleServer.setClientId(CLIENT_PLACEHOLDER);
-		googleServer.setClientSecret(SECRET_PLACEHOLDER);
-		googleServer.setRequestKeyUrl("https://accounts.google.com/o/oauth2/auth?redirect_uri={$redirect_uri}&response_type=code&client_id={$client_id}"
-				+ "&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile");
-		googleServer.setRequestTokenUrl("https://accounts.google.com/o/oauth2/token");
-		googleServer.setRequestTokenMethod(RequestMethod.POST);
-		googleServer.setRequestTokenAttributes("code={$code}&client_id={$client_id}&client_secret={$client_secret}&redirect_uri={$redirect_uri}&grant_type=authorization_code");
-		googleServer.setRequestInfoUrl("https://www.googleapis.com/oauth2/v1/userinfo?access_token={$access_token}");
-		googleServer.setLoginParamName(EMAIL_PARAM);
-		googleServer.setEmailParamName(EMAIL_PARAM);
-		googleServer.setFirstnameParamName("given_name");
-		googleServer.setLastnameParamName("family_name");
-		oauthDao.update(googleServer, null);
+		oauthDao.update(new OAuthServer()
+				.setName("Google")
+				.setIconUrl("https://www.google.com/images/google_favicon_128.png")
+				.setEnabled(false)
+				.setClientId(CLIENT_PLACEHOLDER)
+				.setClientSecret(SECRET_PLACEHOLDER)
+				.setRequestKeyUrl("https://accounts.google.com/o/oauth2/auth?redirect_uri={$redirect_uri}&response_type=code&client_id={$client_id}"
+						+ "&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile")
+				.setRequestTokenUrl("https://accounts.google.com/o/oauth2/token")
+				.setRequestTokenMethod(RequestTokenMethod.POST)
+				.setRequestTokenAttributes("code={$code}&client_id={$client_id}&client_secret={$client_secret}&redirect_uri={$redirect_uri}&grant_type=authorization_code")
+				.setRequestInfoUrl("https://www.googleapis.com/oauth2/v1/userinfo?access_token={$access_token}")
+				.setRequestInfoMethod(RequestInfoMethod.GET)
+				.addMapping(PARAM_LOGIN, EMAIL_PARAM)
+				.addMapping(PARAM_EMAIL, EMAIL_PARAM)
+				.addMapping(PARAM_FNAME, "given_name")
+				.addMapping(PARAM_LNAME, "family_name"), null);
 
 		// Facebook
-		OAuthServer fbServer = new OAuthServer();
-		fbServer.setName("Facebook");
-		fbServer.setIconUrl("https://www.facebook.com/images/fb_icon_325x325.png");
-		fbServer.setEnabled(false);
-		fbServer.setClientId(CLIENT_PLACEHOLDER);
-		fbServer.setClientSecret(SECRET_PLACEHOLDER);
-		fbServer.setRequestKeyUrl("https://www.facebook.com/v2.10/dialog/oauth?client_id={$client_id}&redirect_uri={$redirect_uri}&scope=email");
-		fbServer.setRequestTokenUrl("https://graph.facebook.com/v2.10/oauth/access_token");
-		fbServer.setRequestTokenMethod(RequestMethod.POST);
-		fbServer.setRequestTokenAttributes("client_id={$client_id}&redirect_uri={$redirect_uri}&client_secret={$client_secret}&code={$code}");
-		fbServer.setRequestInfoUrl("https://graph.facebook.com/me?access_token={$access_token}&fields=id,first_name,last_name,email");
-		fbServer.setLoginParamName("id");
-		fbServer.setEmailParamName(EMAIL_PARAM);
-		fbServer.setFirstnameParamName(FNAME_PARAM);
-		fbServer.setLastnameParamName(LNAME_PARAM);
-		oauthDao.update(fbServer, null);
+		oauthDao.update(new OAuthServer()
+				.setName("Facebook")
+				.setIconUrl("https://www.facebook.com/images/fb_icon_325x325.png")
+				.setEnabled(false)
+				.setClientId(CLIENT_PLACEHOLDER)
+				.setClientSecret(SECRET_PLACEHOLDER)
+				.setRequestKeyUrl("https://www.facebook.com/v2.10/dialog/oauth?client_id={$client_id}&redirect_uri={$redirect_uri}&scope=email")
+				.setRequestTokenUrl("https://graph.facebook.com/v2.10/oauth/access_token")
+				.setRequestTokenMethod(RequestTokenMethod.POST)
+				.setRequestTokenAttributes("client_id={$client_id}&redirect_uri={$redirect_uri}&client_secret={$client_secret}&code={$code}")
+				.setRequestInfoUrl("https://graph.facebook.com/me?access_token={$access_token}&fields=id,first_name,last_name,email")
+				.setRequestInfoMethod(RequestInfoMethod.GET)
+				.addMapping(PARAM_LOGIN, "id")
+				.addMapping(PARAM_EMAIL, EMAIL_PARAM)
+				.addMapping(PARAM_FNAME, FNAME_PARAM)
+				.addMapping(PARAM_LNAME, LNAME_PARAM), null);
 
 		// VK
-		OAuthServer vkServer = new OAuthServer();
-		vkServer.setName("VK");
-		vkServer.setIconUrl("https://vk.com/images/safari_152.png");
-		vkServer.setEnabled(false);
-		vkServer.setClientId(CLIENT_PLACEHOLDER);
-		vkServer.setClientSecret(SECRET_PLACEHOLDER);
-		vkServer.setRequestKeyUrl("https://oauth.vk.com/authorize?client_id={$client_id}&scope=email&redirect_uri={$redirect_uri}&response_type=code&v=5.68");
-		vkServer.setRequestTokenUrl("https://oauth.vk.com/access_token");
-		vkServer.setRequestTokenMethod(RequestMethod.POST);
-		vkServer.setRequestTokenAttributes("client_id={$client_id}&client_secret={$client_secret}&code={$code}&redirect_uri={$redirect_uri}");
-		vkServer.setRequestInfoUrl("https://api.vk.com/method/users.get?user_ids=&access_token={$access_token}&fields=id,first_name,last_name,email&name_case=nom");
-		vkServer.setLoginParamName("uid");
-		vkServer.setEmailParamName(EMAIL_PARAM);
-		vkServer.setFirstnameParamName(FNAME_PARAM);
-		vkServer.setLastnameParamName(LNAME_PARAM);
-		oauthDao.update(vkServer, null);
+		oauthDao.update(new OAuthServer()
+				.setName("VK")
+				.setIconUrl("https://vk.com/images/safari_152.png")
+				.setEnabled(false)
+				.setClientId(CLIENT_PLACEHOLDER)
+				.setClientSecret(SECRET_PLACEHOLDER)
+				.setRequestKeyUrl("https://oauth.vk.com/authorize?client_id={$client_id}&scope=email&redirect_uri={$redirect_uri}&response_type=code&v=5.68")
+				.setRequestTokenUrl("https://oauth.vk.com/access_token")
+				.setRequestTokenMethod(RequestTokenMethod.POST)
+				.setRequestTokenAttributes("client_id={$client_id}&client_secret={$client_secret}&code={$code}&redirect_uri={$redirect_uri}")
+				.setRequestInfoUrl("https://api.vk.com/method/users.get?&v=5.92&user_ids={$user_id}&access_token={$access_token}&fields=id,first_name,last_name,email&name_case=nom")
+				.setRequestInfoMethod(RequestInfoMethod.GET)
+				.addMapping(PARAM_LOGIN, "id")
+				.addMapping(PARAM_EMAIL, EMAIL_PARAM)
+				.addMapping(PARAM_FNAME, FNAME_PARAM)
+				.addMapping(PARAM_LNAME, LNAME_PARAM), null);
 	}
 
 	// ------------------------------------------------------------------------------

@@ -19,6 +19,7 @@
 package org.apache.openmeetings.web.room;
 
 import static org.apache.openmeetings.util.OpenmeetingsVariables.ATTR_CLASS;
+import static org.apache.openmeetings.util.OpenmeetingsVariables.getChromeExtensionUrl;
 import static org.apache.openmeetings.web.app.WebSession.getDateFormat;
 import static org.apache.openmeetings.web.app.WebSession.getUserId;
 import static org.apache.openmeetings.web.room.wb.InterviewWbPanel.INTERVIEWWB_JS_REFERENCE;
@@ -34,6 +35,7 @@ import java.util.Map.Entry;
 import java.util.Set;
 
 import org.apache.openmeetings.core.remote.KurentoHandler;
+import org.apache.openmeetings.core.remote.StreamProcessor;
 import org.apache.openmeetings.core.util.WebSocketHelper;
 import org.apache.openmeetings.db.dao.calendar.AppointmentDao;
 import org.apache.openmeetings.db.dao.log.ConferenceLogDao;
@@ -111,7 +113,7 @@ public class RoomPanel extends BasePanel {
 	private static final String EVENT_DETAILS_ID = "event-details";
 	public enum Action {
 		kick
-		, exclusive
+		, muteOthers
 		, mute
 	}
 	private final Room r;
@@ -136,8 +138,9 @@ public class RoomPanel extends BasePanel {
 					.put("rights", _c.toJson(true).getJSONArray("rights"))
 					.put("interview", interview)
 					.put("audioOnly", r.isAudioOnly())
+					.put("questions", r.isAllowUserQuestions())
 					.put("showMicStatus", !r.getHiddenElements().contains(RoomElement.MicrophoneStatus))
-					.put("exclusiveTitle", getString("1386"));
+					.put("chromeExtUrl", getChromeExtensionUrl());
 			if (!Strings.isEmpty(r.getRedirectURL()) && (ws.getSoapLogin() != null || ws.getInvitation() != null)) {
 				options.put("reloadUrl", r.getRedirectURL());
 			}
@@ -165,17 +168,16 @@ public class RoomPanel extends BasePanel {
 
 		private void initVideos(AjaxRequestTarget target) {
 			StringBuilder sb = new StringBuilder();
-			Client _c = getClient();
 			JSONArray streams = new JSONArray();
 			for (Client c: cm.listByRoom(getRoom().getId())) {
 				for (StreamDesc sd : c.getStreams()) {
 					streams.put(sd.toJson());
 				}
-				if (streams.length() > 0) {
-					sb.append("VideoManager.play(").append(streams).append(", ").append(kHandler.getTurnServers()).append(");");
-				}
 			}
-			if (interview && !kHandler.isRecording(r.getId()) && streams.length() > 0 && _c.hasRight(Right.moderator)) {
+			if (streams.length() > 0) {
+				sb.append("VideoManager.play(").append(streams).append(", ").append(kHandler.getTurnServers()).append(");");
+			}
+			if (interview && streamProcessor.recordingAllowed(getClient())) {
 				sb.append("WbArea.setRecEnabled(true);");
 			}
 			if (!Strings.isEmpty(sb)) {
@@ -189,7 +191,6 @@ public class RoomPanel extends BasePanel {
 	private RoomMenuPanel menu;
 	private RoomSidebar sidebar;
 	private final AbstractWbPanel wb;
-	private String sharingUser = null;
 	private byte[] pdfWb;
 	private final AjaxDownloadBehavior download = new AjaxDownloadBehavior(new ResourceStreamResource() {
 		private static final long serialVersionUID = 1L;
@@ -238,6 +239,8 @@ public class RoomPanel extends BasePanel {
 	private QuickPollManager qpollManager;
 	@SpringBean
 	private KurentoHandler kHandler;
+	@SpringBean
+	private StreamProcessor streamProcessor;
 
 	public RoomPanel(String id, Room r) {
 		super(id);
@@ -426,31 +429,8 @@ public class RoomPanel extends BasePanel {
 						menu.update(handler);
 						updateInterviewRecordingButtons(handler);
 						break;
-					case sharingStoped:
-						{
-							JSONObject obj = new JSONObject(((TextRoomMessage)m).getText());
-							String uid = obj.getString("uid");
-							Client c = cm.getBySid(obj.getString("sid"));
-							if (c == null) {
-								log.error("Not existing user has started sharing {} !!!!", obj);
-								return;
-							}
-							handler.appendJavaScript(String.format("VideoManager.close('%s', true);", uid));
-							sharingUser = null;
-							menu.update(handler);
-						}
-						break;
-					case sharingStarted:
-						{
-							String uid = ((TextRoomMessage)m).getText();
-							Client c = cm.get(uid);
-							if (c == null) {
-								log.error("Not existing user has started sharing {} !!!!", uid);
-								return;
-							}
-							sharingUser = uid;
-							menu.update(handler);
-						}
+					case sharingToggled:
+						menu.update(handler);
 						break;
 					case rightUpdated:
 						{
@@ -461,7 +441,8 @@ public class RoomPanel extends BasePanel {
 								return;
 							}
 							boolean self = _c.getUid().equals(c.getUid());
-							handler.appendJavaScript(String.format("VideoManager.update(%s);", c.toJson(self)));
+							handler.appendJavaScript(String.format("VideoManager.update(%s);"
+									, c.toJson(self).toString(new NullStringer())));
 							sidebar.update(handler);
 							menu.update(handler);
 							wb.update(handler);
@@ -502,8 +483,8 @@ public class RoomPanel extends BasePanel {
 					case requestRightAv:
 						sidebar.addActivity(new Activity((TextRoomMessage)m, Activity.Type.reqRightAv), handler);
 						break;
-					case requestRightExclusive:
-						sidebar.addActivity(new Activity((TextRoomMessage)m, Activity.Type.reqRightExclusive), handler);
+					case requestRightMuteOthers:
+						sidebar.addActivity(new Activity((TextRoomMessage)m, Activity.Type.reqRightMuteOthers), handler);
 						break;
 					case activityRemove:
 						sidebar.removeActivity(((TextRoomMessage)m).getText(), handler);
@@ -537,7 +518,7 @@ public class RoomPanel extends BasePanel {
 						}
 					}
 						break;
-					case exclusive:
+					case muteOthers:
 					{
 						String uid = ((TextRoomMessage)m).getText();
 						Client c = cm.get(uid);
@@ -545,7 +526,7 @@ public class RoomPanel extends BasePanel {
 							// no luck
 							return;
 						}
-						handler.appendJavaScript(String.format("if (typeof(VideoManager) !== 'undefined') {VideoManager.exclusive('%s');}", uid));
+						handler.appendJavaScript(String.format("if (typeof(VideoManager) !== 'undefined') {VideoManager.muteOthers('%s');}", uid));
 					}
 						break;
 					case quickPollUpdated:
@@ -553,6 +534,9 @@ public class RoomPanel extends BasePanel {
 						menu.update(handler);
 						handler.appendJavaScript(getQuickPollJs());
 					}
+						break;
+					case kurentoStatus:
+						menu.update(handler);
 						break;
 				}
 			}
@@ -567,9 +551,9 @@ public class RoomPanel extends BasePanel {
 	private void updateInterviewRecordingButtons(IPartialPageRequestHandler handler) {
 		Client _c = getClient();
 		if (interview && _c.hasRight(Right.moderator)) {
-			if (kHandler.isRecording(r.getId())) {
+			if (streamProcessor.isRecording(r.getId())) {
 				handler.appendJavaScript("if (typeof(WbArea) === 'object') {WbArea.setRecStarted(true);}");
-			} else {
+			} else if (streamProcessor.recordingAllowed(getClient())) {
 				boolean hasStreams = false;
 				for (Client cl : cm.listByRoom(r.getId())) {
 					if (!cl.getStreams().isEmpty()) {
@@ -680,7 +664,7 @@ public class RoomPanel extends BasePanel {
 				return;
 			} else {
 				// we found no-one we can ask, allow right
-				broadcast(cm.update(getClient().allow(right)));
+				rightsUpdated(cm.update(getClient().allow(right)));
 			}
 		}
 		// ask
@@ -700,8 +684,8 @@ public class RoomPanel extends BasePanel {
 			case audio:
 				reqType = Type.requestRightA;
 				break;
-			case exclusive:
-				reqType = Type.requestRightExclusive;
+			case muteOthers:
+				reqType = Type.requestRightMuteOthers;
 				break;
 			case remoteControl:
 				reqType = Type.requestRightRemote;
@@ -718,20 +702,25 @@ public class RoomPanel extends BasePanel {
 	}
 
 	public void allowRight(Client client, Right... rights) {
-		broadcast(client.allow(rights));
+		rightsUpdated(client.allow(rights));
 	}
 
 	public void denyRight(Client client, Right... rights) {
 		for (Right right : rights) {
 			client.deny(right);
 		}
-		if (client.hasActivity(Client.Activity.broadcastA) && !client.hasRight(Right.audio)) {
-			client.remove(Client.Activity.broadcastA);
+		if (client.hasActivity(Client.Activity.AUDIO) && !client.hasRight(Right.audio)) {
+			client.remove(Client.Activity.AUDIO);
 		}
-		if (client.hasActivity(Client.Activity.broadcastV) && !client.hasRight(Right.video)) {
-			client.remove(Client.Activity.broadcastV);
+		if (client.hasActivity(Client.Activity.VIDEO) && !client.hasRight(Right.video)) {
+			client.remove(Client.Activity.VIDEO);
 		}
-		broadcast(client);
+		rightsUpdated(client);
+	}
+
+	public void rightsUpdated(Client c) {
+		cm.update(c);
+		streamProcessor.rightsUpdated(c);
 	}
 
 	public void broadcast(Client client) {
@@ -762,9 +751,7 @@ public class RoomPanel extends BasePanel {
 	}
 
 	public boolean screenShareAllowed() {
-		return !interview && !r.isHidden(RoomElement.ScreenSharing)
-				&& r.isAllowRecording() && getClient().hasRight(Right.share)
-				&& sharingUser == null;
+		return streamProcessor.screenShareAllowed(getClient());
 	}
 
 	public RoomSidebar getSidebar() {
@@ -773,10 +760,6 @@ public class RoomPanel extends BasePanel {
 
 	public AbstractWbPanel getWb() {
 		return wb;
-	}
-
-	public String getSharingUser() {
-		return sharingUser;
 	}
 
 	public String getPublishingUser() {

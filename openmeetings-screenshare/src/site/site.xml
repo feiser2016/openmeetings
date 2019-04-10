@@ -12,8 +12,8 @@
    See the License for the specific language governing permissions and
    limitations under the License.
  -->
-<project xmlns="http://maven.apache.org/DECORATION/1.7.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-		xsi:schemaLocation="http://maven.apache.org/DECORATION/1.7.0 http://maven.apache.org/xsd/decoration-1.7.0.xsd"
+<project xmlns="http://maven.apache.org/DECORATION/1.8.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xsi:schemaLocation="http://maven.apache.org/DECORATION/1.8.0 http://maven.apache.org/xsd/decoration-1.8.0.xsd"
 		name="Apache OpenMeetings Project">
 	<body>
 		<menu ref="parent"/>
@@ -21,7 +21,7 @@
 			<item name="About" href="/index.html" />
 			<item name="Info" href="/project-info.html" />
 			<item name="Summary" href="/summary.html" />
-			<item name="License" href="http://www.apache.org/licenses/" />
+			<item name="License" href="https://www.apache.org/licenses/" />
 			<item name="Dependencies" href="/dependencies.html" />
 			<item name="Dependency Convergence" href="/dependency-convergence.html" />
 			<item name="RAT Report" href="/rat-report.html" />

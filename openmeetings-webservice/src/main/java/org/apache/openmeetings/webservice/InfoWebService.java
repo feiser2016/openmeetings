@@ -28,12 +28,13 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
 
 import org.apache.cxf.feature.Features;
+import org.apache.openmeetings.db.dto.basic.Health;
 import org.apache.openmeetings.db.dto.basic.Info;
 import org.springframework.stereotype.Service;
 
 /**
  *
- * The Service contains methods to get localized errors
+ * The Service contains methods to get info about the system
  *
  * @author solomax
  *
@@ -54,5 +55,17 @@ public class InfoWebService {
 	@Path("/version")
 	public Info getVersion() {
 		return new Info();
+	}
+
+	/**
+	 * Method to get health report for this OpenMeetings instance
+	 *
+	 * @return - health report
+	 */
+	@WebMethod
+	@GET
+	@Path("/health")
+	public Health getHealth() {
+		return Health.INSTANCE;
 	}
 }

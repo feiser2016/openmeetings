@@ -23,9 +23,10 @@ import static org.apache.openmeetings.util.OpenmeetingsVariables.isInitComplete;
 import static org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE;
 import static org.springframework.web.context.support.WebApplicationContextUtils.getWebApplicationContext;
 
+import java.util.UUID;
+
 import javax.servlet.ServletContext;
 import javax.servlet.ServletContextEvent;
-import javax.servlet.SessionCookieConfig;
 
 import org.apache.openmeetings.IApplication;
 import org.apache.openmeetings.IWebSession;
@@ -46,7 +47,6 @@ import org.apache.wicket.request.cycle.RequestCycle;
 import org.apache.wicket.request.cycle.RequestCycleContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.mock.web.MockSessionCookieConfig;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.support.XmlWebApplicationContext;
 
@@ -62,15 +62,8 @@ public class ApplicationHelper {
 			// This is the case for non-web-app applications (command line admin)
 			try {
 				app = (WebApplication)OpenmeetingsVariables.getAppClass().newInstance();
-				app.setName("--dumb--"); //temporary name for temporary application
-				ServletContext sc = new MockServletContext(app, null) {
-					@Override
-					public SessionCookieConfig getSessionCookieConfig() {
-						SessionCookieConfig cfg = new MockSessionCookieConfig();
-						cfg.setName("_ensureApplication"); // FIXME TODO WICKET-6588
-						return cfg;
-					}
-				};
+				app.setName(String.format("--%s--", UUID.randomUUID())); //temporary name for temporary application
+				ServletContext sc = new MockServletContext(app, null);
 				XmlWebApplicationContext xmlContext = new XmlWebApplicationContext();
 				xmlContext.setConfigLocation("classpath:applicationContext.xml");
 				xmlContext.setServletContext(sc);
@@ -91,14 +84,7 @@ public class ApplicationHelper {
 			try {
 				app.getServletContext();
 			} catch(IllegalStateException e) {
-				app.setServletContext(new MockServletContext(app, null) {
-					@Override
-					public SessionCookieConfig getSessionCookieConfig() {
-						SessionCookieConfig cfg = new MockSessionCookieConfig();
-						cfg.setName("_ensureApplication"); // FIXME TODO WICKET-6588
-						return cfg;
-					}
-				});
+				app.setServletContext(new MockServletContext(app, null));
 			}
 			app.setConfigurationType(RuntimeConfigurationType.DEPLOYMENT);
 			OMContextListener omcl = new OMContextListener();

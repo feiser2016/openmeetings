@@ -11,19 +11,89 @@ var VideoManager = (function() {
 			if (error) {
 				return OmUtil.error(error);
 			}
+			const vidEls = w.find('audio, video')
+				, vidEl = vidEls.length === 1 ? vidEls[0] : null;
+			if (vidEl && vidEl.paused) {
+				vidEl.play().catch(function(err) {
+					if ('NotAllowedError' === err.name) {
+						VideoUtil.askPermission(function() {
+							vidEl.play();
+						});
+					}
+				});
+			}
 		});
 	}
 	function _onBroadcast(msg) {
-		const uid = msg.stream.uid;
+		const sd = msg.stream
+			, uid = sd.uid;
 		$('#' + VideoUtil.getVid(uid)).remove();
 		Video().init(msg);
 		OmUtil.log(uid + ' registered in room');
+	}
+	function _onShareUpdated(msg) {
+		const sd = msg.stream
+			, uid = sd.uid
+			, w = $('#' + VideoUtil.getVid(uid))
+			, v = w.data();
+		if (!VideoUtil.isSharing(sd) && !VideoUtil.isRecording(sd)) {
+			VideoManager.close(uid, false);
+		} else {
+			v.stream().activities = sd.activities;
+		}
+		Sharer.setShareState(VideoUtil.isSharing(sd) ? SHARE_STARTED : SHARE_STOPED);
+		Sharer.setRecState(VideoUtil.isRecording(sd) ? SHARE_STARTED : SHARE_STOPED);
 	}
 	function _onReceive(msg) {
 		const uid = msg.stream.uid;
 		$('#' + VideoUtil.getVid(uid)).remove();
 		Video().init(msg);
 		OmUtil.log(uid + ' receiving video');
+	}
+	function _onKMessage(m) {
+		switch (m.id) {
+			case 'clientLeave':
+				$(VID_SEL + ' div[data-client-uid="' + m.uid + '"]').each(function() {
+					_closeV($(this));
+				});
+				if (share.data('cuid') === m.uid) {
+					share.off('click').hide();
+				}
+				break;
+			case 'broadcastStopped':
+				_close(m.uid, false);
+				break;
+			case 'broadcast':
+				_onBroadcast(m);
+				break;
+			case 'videoResponse':
+				_onVideoResponse(m);
+				break;
+			case 'iceCandidate':
+				{
+					const w = $('#' + VideoUtil.getVid(m.uid))
+						, v = w.data()
+
+					v.getPeer().addIceCandidate(m.candidate, function (error) {
+						if (error) {
+							OmUtil.error('Error adding candidate: ' + error);
+							return;
+						}
+					});
+				}
+				break;
+			case 'newStream':
+				_play([m.stream], m.iceServers);
+				break;
+			case 'shareUpdated':
+				_onShareUpdated(m);
+				break;
+			case 'error':
+				OmUtil.error(m.message);
+				break;
+			default:
+				//no-op
+		}
 	}
 	function _onWsMessage(jqEvent, msg) {
 		try {
@@ -36,38 +106,7 @@ var VideoManager = (function() {
 			}
 			if ('kurento' === m.type && 'test' !== m.mode) {
 				OmUtil.info('Received message: ' + msg);
-				switch (m.id) {
-					case 'broadcastStopped':
-						_closeV($('#' + VideoUtil.getVid(m.uid)));
-						break;
-					case 'broadcast':
-						_onBroadcast(m);
-						break;
-					case 'videoResponse':
-						_onVideoResponse(m);
-						break;
-					case 'iceCandidate':
-						{
-							const w = $('#' + VideoUtil.getVid(m.uid))
-								, v = w.data()
-
-							v.getPeer().addIceCandidate(m.candidate, function (error) {
-								if (error) {
-									OmUtil.error('Error adding candidate: ' + error);
-									return;
-								}
-							});
-						}
-						break;
-					case 'newStream':
-						_onReceive(m);
-						break;
-					case 'error':
-						OmUtil.error(m.message);
-						break;
-					default:
-						//no-op
-				}
+				_onKMessage(m);
 			} else if ('mic' === m.type) {
 				switch (m.id) {
 					case 'activity':
@@ -92,7 +131,8 @@ var VideoManager = (function() {
 			return;
 		}
 		c.streams.forEach(function(sd) {
-			if (sd.self && VideoUtil.isSharing(sd)) {
+			sd.self = c.self;
+			if (VideoUtil.isSharing(sd) || VideoUtil.isRecording(sd)) {
 				return;
 			}
 			const _id = VideoUtil.getVid(sd.uid)
@@ -136,17 +176,18 @@ var VideoManager = (function() {
 		streams.forEach(function(sd) {
 			const m = {stream: sd, iceServers: iceServers};
 			if (VideoUtil.isSharing(sd)) {
-				_highlight(share
+				VideoUtil.highlight(share
 						.attr('title', share.data('user') + ' ' + sd.user.firstName + ' ' + sd.user.lastName + ' ' + share.data('text'))
 						.data('uid', sd.uid)
+						.data('cuid', sd.cuid)
 						.show(), 10);
 				share.tooltip().off('click').click(function() {
-					const v = $('#' + VideoUtil.getVid(sd.uid))
-					if (v.length !== 1) {
-						Video().init(m);
-					} else {
-						v.dialog('open');
+					let v = $('#' + VideoUtil.getVid(sd.uid))
+					if (v.length === 1) {
+						v.remove();
 					}
+					v = Video().init(m);
+					VideoUtil.setPos(v, {left: 0, top: 35});
 				});
 			} else {
 				_onReceive(m);
@@ -154,7 +195,7 @@ var VideoManager = (function() {
 		});
 	}
 	function _close(uid, showShareBtn) {
-		const _id = VideoUtil.getVid(uid), v = $('#' + _id);
+		const v = $('#' + VideoUtil.getVid(uid));
 		if (v.length === 1) {
 			_closeV(v);
 		}
@@ -162,18 +203,8 @@ var VideoManager = (function() {
 			share.off('click').hide();
 		}
 	}
-	function _highlight(el, count) {
-		if (count < 0) {
-			return;
-		}
-		el.addClass('ui-state-highlight', 2000, function() {
-			el.removeClass('ui-state-highlight', 2000, function() {
-				_highlight(el, --count);
-			});
-		});
-	}
 	function _find(uid) {
-		return $(VID_SEL + ' div[data-client-uid="webCam' + uid + '"]');
+		return $(VID_SEL + ' div[data-client-uid="' + uid + '"][data-client-type="WEBCAM"]');
 	}
 	function _userSpeaks(uid, active) {
 		const u = $('#user' + uid + ' .audio-activity.ui-icon')
@@ -198,18 +229,18 @@ var VideoManager = (function() {
 			v.data().mute(mute);
 		}
 	}
-	function _clickExclusive(uid) {
+	function _clickMuteOthers(uid) {
 		const s = VideoSettings.load();
-		if (false !== s.video.confirmExclusive) {
-			const dlg = $('#exclusive-confirm');
+		if (false !== s.video.confirmMuteOthers) {
+			const dlg = $('#muteothers-confirm');
 			dlg.dialog({
 				buttons: [
 					{
 						text: dlg.data('btn-ok')
 						, click: function() {
-							s.video.confirmExclusive = !$('#exclusive-confirm-dont-show').prop('checked');
+							s.video.confirmMuteOthers = !$('#muteothers-confirm-dont-show').prop('checked');
 							VideoSettings.save();
-							roomAction('exclusive', uid);
+							roomAction('muteOthers', uid);
 							$(this).dialog('close');
 						}
 					}
@@ -223,7 +254,7 @@ var VideoManager = (function() {
 			})
 		}
 	}
-	function _exclusive(uid) {
+	function _muteOthers(uid) {
 		const windows = $(VID_SEL + ' .ui-dialog-content');
 		for (let i = 0; i < windows.length; ++i) {
 			const w = $(windows[i]);
@@ -236,33 +267,6 @@ var VideoManager = (function() {
 			, activity: activity
 		});
 	}
-	function _getScreenStream(callback) {
-		//FIXME TODO frameRate
-		//FIXME TODO can be unified
-		const b = kurentoUtils.WebRtcPeer.browser;
-		if (VideoUtil.isEdge() && b.major > 16) {
-			navigator.getDisplayMedia({
-				video: true
-			}).then(function(stream) {
-				callback(stream);
-			})
-			.catch(function(err) {
-				OmUtil.error(err);
-			});
-		} else if (b.name === 'Firefox') {
-			// https://mozilla.github.io/webrtc-landing/gum_test.html
-			navigator.mediaDevices.getUserMedia({
-				video: {
-					mediaSource: 'screen' // 'window'/'application' //FIXME TODO different behavior
-				}
-			}).then(function(stream) {
-				callback(stream);
-			})
-			.catch(function(err) {
-				OmUtil.error(err);
-			});
-		}
-	}
 
 	self.init = _init;
 	self.update = _update;
@@ -270,8 +274,8 @@ var VideoManager = (function() {
 	self.close = _close;
 	self.refresh = _refresh;
 	self.mute = _mute;
-	self.clickExclusive = _clickExclusive;
-	self.exclusive = _exclusive;
+	self.clickMuteOthers = _clickMuteOthers;
+	self.muteOthers = _muteOthers;
 	self.toggleActivity = _toggleActivity;
 	self.sendMessage = function(_m) {
 		OmUtil.sendMessage(_m, {type: 'kurento'});

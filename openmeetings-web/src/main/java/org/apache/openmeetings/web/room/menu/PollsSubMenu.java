@@ -76,8 +76,8 @@ public class PollsSubMenu implements Serializable {
 				if (ACTION_CLOSE.equals(action)) {
 					qpollManager.close(c);
 				} else if (PARAM_VOTE.equals(action)) {
-					boolean vote = mp.getRequest().getRequestParameters().getParameterValue(PARAM_VOTE).toBoolean();
-					qpollManager.vote(c, vote);
+					final boolean curVote = mp.getRequest().getRequestParameters().getParameterValue(PARAM_VOTE).toBoolean();
+					qpollManager.vote(c, curVote);
 				}
 			} catch (Exception e) {
 				log.error("Unexpected exception while toggle 'quickPollAction'", e);
@@ -96,7 +96,7 @@ public class PollsSubMenu implements Serializable {
 		this.mp = mp;
 		mp.add(createPoll = new CreatePollDialog("createPoll", room.getRoom().getId()));
 		mp.add(vote = new VoteDialog("vote"));
-		mp.add(pollResults = new PollResultsDialog("pollResults", room.getRoom().getId()));
+		mp.add(pollResults = new PollResultsDialog("pollResults", createPoll, room.getRoom().getId()));
 		visible = !room.getRoom().isHidden(RoomElement.PollMenu);
 	}
 

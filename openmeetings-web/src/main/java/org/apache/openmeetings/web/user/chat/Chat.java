@@ -18,8 +18,8 @@
  */
 package org.apache.openmeetings.web.user.chat;
 
-import static org.apache.openmeetings.core.util.WebSocketHelper.ID_ALL;
-import static org.apache.openmeetings.core.util.WebSocketHelper.ID_ROOM_PREFIX;
+import static org.apache.openmeetings.core.util.ChatWebSocketHelper.ID_ALL;
+import static org.apache.openmeetings.core.util.ChatWebSocketHelper.ID_ROOM_PREFIX;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_DASHBOARD_SHOW_CHAT;
 import static org.apache.openmeetings.web.app.WebSession.getUserId;
 import static org.apache.openmeetings.web.room.RoomPanel.isModerator;
@@ -34,6 +34,7 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 
+import org.apache.openmeetings.core.util.ChatWebSocketHelper;
 import org.apache.openmeetings.core.util.WebSocketHelper;
 import org.apache.openmeetings.db.dao.basic.ChatDao;
 import org.apache.openmeetings.db.dao.basic.ConfigurationDao;
@@ -81,7 +82,7 @@ public class Chat extends Panel {
 					if (m.isNeedModeration() && isModerator(cm, getUserId(), roomId)) {
 						m.setNeedModeration(false);
 						chatDao.update(m);
-						WebSocketHelper.sendRoom(m, getMessage(Arrays.asList(m)).put("mode",  "accept"));
+						ChatWebSocketHelper.sendRoom(m, getMessage(Arrays.asList(m)).put("mode",  "accept"));
 					} else {
 						log.error("It seems like we are being hacked!!!!");
 					}
@@ -135,12 +136,13 @@ public class Chat extends Panel {
 	}
 
 	public static JSONObject getMessage(User curUser, List<ChatMessage> list) {
-		return WebSocketHelper.getMessage(curUser, list, (o, u) -> o.put("img", getUrl(RequestCycle.get(), u)));
+		return ChatWebSocketHelper.getMessage(curUser, list, (o, u) -> o.put("img", getUrl(RequestCycle.get(), u)));
 	}
 
 	public CharSequence getReinit() {
 		StringBuilder sb = new StringBuilder("Chat.reinit(")
 				.append(new JSONObject()
+						.put("userId", getUserId())
 						.put("all", getString("1494"))
 						.put("room", getString("406"))
 						.put("sendOnEnter", OpenmeetingsVariables.getChatSenndOnEnter()).toString())

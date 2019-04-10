@@ -22,23 +22,29 @@
 package org.apache.openmeetings.core.remote;
 
 import static java.util.UUID.randomUUID;
+import static org.apache.openmeetings.core.remote.KurentoHandler.PARAM_ICE;
+import static org.apache.openmeetings.core.remote.KurentoHandler.newKurentoMsg;
 
 import java.util.Collection;
 import java.util.Date;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.openmeetings.core.util.WebSocketHelper;
 import org.apache.openmeetings.db.dao.record.RecordingChunkDao;
-import org.apache.openmeetings.db.dao.record.RecordingDao;
 import org.apache.openmeetings.db.entity.basic.Client;
+import org.apache.openmeetings.db.entity.basic.Client.Activity;
 import org.apache.openmeetings.db.entity.basic.Client.StreamDesc;
+import org.apache.openmeetings.db.entity.basic.Client.StreamType;
 import org.apache.openmeetings.db.entity.file.BaseFileItem;
 import org.apache.openmeetings.db.entity.record.Recording;
 import org.apache.openmeetings.db.entity.room.Room;
 import org.apache.openmeetings.db.entity.user.User;
+import org.apache.openmeetings.db.manager.IClientManager;
 import org.apache.openmeetings.db.util.ws.RoomMessage;
+import org.apache.openmeetings.db.util.ws.TextRoomMessage;
 import org.apache.openmeetings.util.CalendarPatterns;
 import org.kurento.client.Continuation;
 import org.kurento.client.MediaPipeline;
@@ -51,15 +57,19 @@ public class KRoom {
 	private static final Logger log = LoggerFactory.getLogger(KRoom.class);
 
 	private final Map<String, KStream> streams = new ConcurrentHashMap<>();
-	final MediaPipeline pipeline;
-	final Long roomId;
-	final AtomicBoolean recordingStarted = new AtomicBoolean(false);
-	Long recordingId = null;
-	final RecordingChunkDao chunkDao;
+	private final MediaPipeline pipeline;
+	private final Long roomId;
+	private final Room.Type type;
+	private final AtomicBoolean recordingStarted = new AtomicBoolean(false);
+	private final AtomicBoolean sharingStarted = new AtomicBoolean(false);
+	private Long recordingId = null;
+	private final RecordingChunkDao chunkDao;
 	private JSONObject recordingUser = new JSONObject();
+	private JSONObject sharingUser = new JSONObject();
 
-	public KRoom(Long roomId, MediaPipeline pipeline, RecordingChunkDao chunkDao) {
-		this.roomId = roomId;
+	public KRoom(Room r, MediaPipeline pipeline, RecordingChunkDao chunkDao) {
+		this.roomId = r.getId();
+		this.type = r.getType();
 		this.pipeline = pipeline;
 		this.chunkDao = chunkDao;
 		log.info("ROOM {} has been created", roomId);
@@ -69,8 +79,20 @@ public class KRoom {
 		return roomId;
 	}
 
-	public String getPipelineId() {
-		return pipeline.getId();
+	public Room.Type getType() {
+		return type;
+	}
+
+	public Long getRecordingId() {
+		return recordingId;
+	}
+
+	public MediaPipeline getPipeline() {
+		return pipeline;
+	}
+
+	public RecordingChunkDao getChunkDao() {
+		return chunkDao;
 	}
 
 	public KStream join(final StreamDesc sd) {
@@ -84,13 +106,30 @@ public class KRoom {
 		return streams.values();
 	}
 
-	public void leave(final KurentoHandler h, final Client c) {
+	public void onStopBroadcast(KStream stream, final StreamProcessor processor) {
+		streams.remove(stream.getUid());
+		stream.release(processor);
+		WebSocketHelper.sendAll(newKurentoMsg()
+				.put("id", "broadcastStopped")
+				.put("uid", stream.getUid())
+				.toString()
+			);
+		//FIXME TODO check close on stop sharing
+		//FIXME TODO permission can be removed, some listener might be required
+	}
+
+	public void leave(final StreamProcessor processor, final Client c) {
 		for (Map.Entry<String, KStream> e : streams.entrySet()) {
 			e.getValue().remove(c);
 		}
-		KStream stream = streams.remove(c.getUid());
-		if (stream != null) {
-			stream.release(h);
+		for (StreamDesc sd : c.getStreams()) {
+			if (StreamType.SCREEN == sd.getType()) {
+
+			}
+			KStream stream = streams.remove(sd.getUid());
+			if (stream != null) {
+				stream.release(processor);
+			}
 		}
 	}
 
@@ -102,7 +141,7 @@ public class KRoom {
 		return new JSONObject(recordingUser.toString());
 	}
 
-	public void startRecording(Client c, RecordingDao recDao) {
+	public void startRecording(StreamProcessor processor, Client c) {
 		if (recordingStarted.compareAndSet(false, true)) {
 			log.debug("##REC:: recording in room {} is starting ::", roomId);
 			Room r = c.getRoom();
@@ -129,13 +168,20 @@ public class KRoom {
 
 			rec.setOwnerId(ownerId);
 			rec.setStatus(Recording.Status.RECORDING);
-			rec = recDao.update(rec);
-			// Receive recordingId
-			recordingId = rec.getId();
 			log.debug("##REC:: recording created by USER: {}", ownerId);
 
+			Optional<StreamDesc> osd = c.getScreenStream();
+			if (osd.isPresent()) {
+				osd.get().addActivity(Activity.RECORD);
+				processor.getClientManager().update(c);
+				rec.setWidth(osd.get().getWidth());
+				rec.setHeight(osd.get().getWidth());
+			}
+			rec = processor.getRecordingDao().update(rec);
+			// Receive recordingId
+			recordingId = rec.getId();
 			for (final KStream stream : streams.values()) {
-				stream.startRecord();
+				stream.startRecord(processor);
 			}
 
 			// Send notification to all users that the recording has been started
@@ -144,29 +190,82 @@ public class KRoom {
 		}
 	}
 
-	public void stopRecording(KurentoHandler h, Client c, RecordingDao recDao) {
+	public void stopRecording(final StreamProcessor processor, Client c) {
 		if (recordingStarted.compareAndSet(true, false)) {
 			log.debug("##REC:: recording in room {} is stopping {} ::", roomId, recordingId);
 			for (final KStream stream : streams.values()) {
 				stream.stopRecord();
 			}
-			Recording rec = recDao.get(recordingId);
+			Recording rec = processor.getRecordingDao().get(recordingId);
 			rec.setRecordEnd(new Date());
-			rec = recDao.update(rec);
+			rec = processor.getRecordingDao().update(rec);
 			recordingUser = new JSONObject();
 			recordingId = null;
 
-			h.startConvertion(rec);
+			processor.startConvertion(rec);
+			User u;
+			if (c == null) {
+				u = new User();
+			} else {
+				u = c.getUser();
+				Optional<StreamDesc> osd = c.getScreenStream();
+				if (osd.isPresent()) {
+					osd.get().removeActivity(Activity.RECORD);
+					processor.getClientManager().update(c);
+					processor.getHandler().sendShareUpdated(osd.get());
+				}
+			}
 			// Send notification to all users that the recording has been started
-			User u = c == null ? new User() : c.getUser();
 			WebSocketHelper.sendRoom(new RoomMessage(roomId, u, RoomMessage.Type.recordingToggled));
 			log.debug("##REC:: recording in room {} is stopped ::", roomId);
 		}
 	}
 
-	public void close(final KurentoHandler h) {
+	public boolean isSharing() {
+		return sharingStarted.get();
+	}
+
+	public JSONObject getSharingUser() {
+		return new JSONObject(sharingUser.toString());
+	}
+
+	public void startSharing(StreamProcessor processor, IClientManager cm, Client c, Optional<StreamDesc> osd, JSONObject msg, Activity a) {
+		StreamDesc sd;
+		KurentoHandler h = processor.getHandler();
+		if (sharingStarted.compareAndSet(false, true)) {
+			sharingUser.put("sid", c.getSid());
+			sd = c.addStream(StreamType.SCREEN, a);
+			sd.setWidth(msg.getInt("width")).setHeight(msg.getInt("height"));
+			cm.update(c);
+			log.debug("User {}: has started sharing", sd.getUid());
+			h.sendClient(sd.getSid(), newKurentoMsg()
+					.put("id", "broadcast")
+					.put("stream", sd.toJson()
+							.put("shareType", msg.getString("shareType"))
+							.put("fps", msg.getString("fps")))
+					.put(PARAM_ICE, h.getTurnServers()));
+		} else if (osd.isPresent() && !osd.get().hasActivity(a)) {
+			sd = osd.get();
+			sd.addActivity(a);
+			cm.update(c);
+			h.sendShareUpdated(sd);
+			WebSocketHelper.sendRoom(new TextRoomMessage(c.getRoomId(), c, RoomMessage.Type.rightUpdated, c.getUid()));
+			WebSocketHelper.sendRoomOthers(roomId, c.getUid(), newKurentoMsg()
+					.put("id", "newStream")
+					.put(PARAM_ICE, processor.getHandler().getTurnServers())
+					.put("stream", sd.toJson()));
+		}
+	}
+
+	public void stopSharing() {
+		if (sharingStarted.compareAndSet(true, false)) {
+			sharingUser = new JSONObject();
+		}
+	}
+
+	public void close(final StreamProcessor processor) {
 		for (final KStream stream : streams.values()) {
-			stream.release(h);
+			stream.release(processor);
 		}
 		streams.clear();
 		pipeline.release(new Continuation<Void>() {

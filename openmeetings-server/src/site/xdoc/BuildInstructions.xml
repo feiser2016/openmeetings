@@ -33,7 +33,7 @@
 				<p>To build a binary release of OpenMeetings you need: </p>
 				<ul>
 					<li>Oracle JDK8</li>
-					<li>Apache Maven (minimum) 3.3.9</li>
+					<li>Apache Maven (minimum) 3.5.0</li>
 					<li>Git</li>
 				</ul>
 			</div>
@@ -58,7 +58,7 @@
 			<source>mvn versions:display-property-updates</source>
 		</section>
 		<section name="Check dependencies">
-			<source>mvn org.apache.maven.plugins:maven-dependency-plugin:3.0.0:analyze-only</source>
+			<source>mvn org.apache.maven.plugins:maven-dependency-plugin:analyze-only</source>
 		</section>
 		<section name="Tips and Gotchas">
 			<p>Eclipse ANSI colors plugin for colors in console</p>

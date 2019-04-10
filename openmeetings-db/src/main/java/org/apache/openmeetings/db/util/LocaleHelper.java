@@ -49,7 +49,7 @@ public class LocaleHelper {
 	public static String validateCountry(String _code) {
 		List<String> list = getCountries();
 		Set<String> countries = new HashSet<>(list);
-		String code = _code == null ? "" : _code.toUpperCase();
+		String code = _code == null ? "" : _code.toUpperCase(Locale.ROOT);
 		if (!countries.contains(code)) {
 			String newCountry = list.get(0);
 			log.warn("Invalid country found: {}, will be replaced with: {}", code, newCountry);
@@ -59,7 +59,8 @@ public class LocaleHelper {
 	}
 
 	public static Locale getLocale(Long langId) {
-		return langId == 3 ? Locale.GERMANY : LabelDao.getLocale(langId);
+		Locale l = langId == 3 ? Locale.GERMANY : LabelDao.getLocale(langId);
+		return l == null ? Locale.ENGLISH : l;
 	}
 
 	public static Locale getLocale(User u) {

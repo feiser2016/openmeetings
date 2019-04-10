@@ -37,8 +37,7 @@ public class RoomMessage implements IWebSocketPushMessage {
 		, pollCreated
 		, pollUpdated
 		, recordingToggled
-		, sharingStarted
-		, sharingStoped
+		, sharingToggled
 		, rightUpdated
 		, activityRemove
 		, requestRightModerator
@@ -48,12 +47,13 @@ public class RoomMessage implements IWebSocketPushMessage {
 		, requestRightRemote
 		, requestRightA
 		, requestRightAv
-		, requestRightExclusive
+		, requestRightMuteOthers
 		, haveQuestion
 		, kick
 		, mute
-		, exclusive
+		, muteOthers
 		, quickPollUpdated
+		, kurentoStatus
 	}
 	private final Date timestamp;
 	private final String uid;
@@ -67,16 +67,16 @@ public class RoomMessage implements IWebSocketPushMessage {
 	}
 
 	public RoomMessage(Long roomId, User u, Type type) {
-		this(roomId, u.getId(), u.getFirstname(), u.getLastname(), type);
+		this(roomId, u.getId(), u.getDisplayName(), type);
 	}
 
-	private RoomMessage(Long roomId, Long userId, String firstName, String lastName, Type type) {
+	private RoomMessage(Long roomId, Long userId, String displayName, Type type) {
 		this.timestamp = new Date();
 		this.roomId = roomId;
 		if (SIP_USER_ID.equals(userId)) {
 			this.name = SIP_FIRST_NAME;
 		} else {
-			name = String.format("%s %s", firstName, lastName);
+			name = displayName;
 		}
 		this.userId = userId;
 		this.type = type;
@@ -105,5 +105,13 @@ public class RoomMessage implements IWebSocketPushMessage {
 
 	public String getUid() {
 		return uid;
+	}
+
+	@Override
+	public String toString() {
+		return new StringBuilder().append("RoomMessage [roomId=").append(roomId)
+				.append(", userId=").append(userId)
+				.append(", type=").append(type).append("]")
+				.toString();
 	}
 }
